@@ -23,9 +23,8 @@ async fn main() -> Result<()> {
             vec!["l"],
         )
         .await?;
-    while let Some(_r) = stream.next().await? {
-        break;
-    }
+    // Fetch a single entry, then abandon the rest of the search.
+    let _ = stream.next().await?;
     let _res = stream.finish().await;
     let msgid = stream.ldap_handle().last_id();
     ldap.abandon(msgid).await?;

@@ -344,10 +344,10 @@ pub fn ldap_unescape<'a, S: Into<Cow<'a, str>>>(val: S) -> Result<Cow<'a, str>> 
             _ => (),
         }
     }
-    if output.is_some() {
+    if let Some(output) = output {
         if let Unescaper::Value(_) = esc {
             Ok(Cow::Owned(
-                String::from_utf8(output.unwrap()).map_err(|_| LdapError::DecodingUTF8)?,
+                String::from_utf8(output).map_err(|_| LdapError::DecodingUTF8)?,
             ))
         } else {
             Err(LdapError::DecodingUTF8)

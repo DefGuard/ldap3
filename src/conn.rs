@@ -55,6 +55,9 @@ compile_error!(
 use tokio_util::codec::{Decoder, Framed};
 use url::{self, Url};
 
+// One value exists per connection, so the size gap between the TLS and other
+// variants doesn't matter; boxing the stream would only add indirection.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 enum ConnType {
     Tcp(TcpStream),
@@ -126,7 +129,7 @@ static CACERTS: LazyLock<RootCertStore> = LazyLock::new(|| {
         vec![]
     };
     for cert in cert_vec {
-        if let Ok(_) = store.add(cert) {}
+        let _ = store.add(cert);
     }
     store
 });
