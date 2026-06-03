@@ -392,6 +392,15 @@ impl Ldap {
         let mut buf = client_ctx
             .unwrap(&token)
             .map_err(|e| LdapError::GssapiOperationError(format!("{:#}", e)))?;
+        // The SASL security layer message is a fixed 4 octets: a one-byte layer
+        // bitmask followed by a three-byte maximum buffer size. A shorter message
+        // from a broken or hostile server would otherwise panic on indexing below.
+        if buf.len() != 4 {
+            return Err(LdapError::GssapiOperationError(format!(
+                "expected 4-octet SASL security layer message, got {}",
+                buf.len()
+            )));
+        }
         let needed_layer = if self.has_tls {
             GSSAUTH_P_NONE
         } else {
@@ -415,8 +424,10 @@ impl Ldap {
         if res.rc == 0 {
             if needed_layer == GSSAUTH_P_PRIVACY {
                 buf[0] = 0;
-                let send_max_size =
-                    u32::from_be_bytes((&buf[..]).try_into().expect("send max size"));
+                let size_bytes: [u8; 4] = (&buf[..]).try_into().map_err(|_| {
+                    LdapError::GssapiOperationError(String::from("malformed send max size"))
+                })?;
+                let send_max_size = u32::from_be_bytes(size_bytes);
                 if send_max_size == 0 {
                     warn!("got zero send_max_size, will be treated as unlimited");
                 }
@@ -477,7 +488,7 @@ impl Ldap {
 
         let mut ntlm = Ntlm::new();
         let identity = AuthIdentity {
-            username: Username::parse(username).unwrap(),
+            username: Username::parse(username)?,
             password: password.to_string().into(),
         };
         let mut acq_creds = ntlm
@@ -813,7 +824,7 @@ impl Ldap {
         let req = Tag::Sequence(Sequence {
             id: 23,
             class: TagClass::Application,
-            inner: construct_exop(exop.into()),
+            inner: construct_exop(exop.into())?,
         });
         self.op_call(LdapOp::Single, req)
             .await

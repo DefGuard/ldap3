@@ -51,12 +51,12 @@ pub enum LdapOp {
 
 #[allow(clippy::type_complexity)]
 fn decode_inner(buf: &mut BytesMut) -> Result<Option<(RequestId, (Tag, Vec<Control>))>, io::Error> {
-    let decoding_error = io::Error::new(io::ErrorKind::Other, "decoding error");
+    let decoding_error = || io::Error::other("decoding error");
     let mut parser = lber::Parser::new();
     let binding = parser.parse(buf);
     let (i, tag) = match binding {
         Err(e) if e.is_incomplete() => return Ok(None),
-        Err(_e) => return Err(decoding_error),
+        Err(_e) => return Err(decoding_error()),
         Ok((i, ref tag)) => (i, tag),
     };
     buf.advance(buf.len() - i.len());
@@ -66,9 +66,9 @@ fn decode_inner(buf: &mut BytesMut) -> Result<Option<(RequestId, (Tag, Vec<Contr
         .and_then(|t| t.expect_constructed())
     {
         Some(tags) => tags,
-        None => return Err(decoding_error),
+        None => return Err(decoding_error()),
     };
-    let mut maybe_controls = tags.pop().expect("element");
+    let mut maybe_controls = tags.pop().ok_or_else(decoding_error)?;
     let has_controls = match maybe_controls {
         StructureTag {
             id,
@@ -76,7 +76,7 @@ fn decode_inner(buf: &mut BytesMut) -> Result<Option<(RequestId, (Tag, Vec<Contr
             ref payload,
         } if class == TagClass::Context && id == 0 => match *payload {
             PL::C(_) => true,
-            PL::P(_) => return Err(decoding_error),
+            PL::P(_) => return Err(decoding_error()),
         },
         StructureTag { id, class, .. } if class == TagClass::Context && id == 10 => {
             // Active Directory bug workaround
@@ -86,31 +86,30 @@ fn decode_inner(buf: &mut BytesMut) -> Result<Option<(RequestId, (Tag, Vec<Contr
             // but AD puts it outside, where the optional controls belong. This confuses
             // our parser, which doesn't expect the extra sequence element at the end
             // and crashes. This match arm thus ignores the element.
-            maybe_controls = tags.pop().expect("element");
+            maybe_controls = tags.pop().ok_or_else(decoding_error)?;
             false
         }
         _ => false,
     };
     let (protoop, controls) = if has_controls {
-        (tags.pop().expect("element"), Some(maybe_controls))
+        (tags.pop().ok_or_else(decoding_error)?, Some(maybe_controls))
     } else {
         (maybe_controls, None)
     };
     let controls = match controls {
-        Some(controls) => parse_controls(controls),
+        Some(controls) => parse_controls(controls).map_err(|e| io::Error::other(e.to_string()))?,
         None => vec![],
     };
     let msgid = match parse_uint(
         tags.pop()
-            .expect("element")
-            .match_class(TagClass::Universal)
+            .and_then(|t| t.match_class(TagClass::Universal))
             .and_then(|t| t.match_id(Types::Integer as u64))
             .and_then(|t| t.expect_primitive())
-            .expect("message id")
+            .ok_or_else(decoding_error)?
             .as_slice(),
     ) {
         Ok((_, id)) => id as i32,
-        _ => return Err(decoding_error),
+        _ => return Err(decoding_error()),
     };
     Ok(Some((msgid, (Tag::StructureTag(protoop), controls))))
 }
@@ -142,7 +141,11 @@ impl Decoder for LdapCodec {
         if buf.len() < U32_SIZE {
             return Err(io::Error::new(io::ErrorKind::Other, "invalid SASL buffer"));
         }
-        let sasl_len = u32::from_be_bytes(buf[0..U32_SIZE].try_into().unwrap());
+        let sasl_len = u32::from_be_bytes(
+            buf[0..U32_SIZE]
+                .try_into()
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "invalid SASL buffer"))?,
+        );
         if buf.len() - U32_SIZE < sasl_len as usize {
             return Ok(None);
         }
@@ -241,5 +244,26 @@ impl Encoder<(RequestId, Tag, MaybeControls)> for LdapCodec {
         };
         maybe_wrap(self, outstruct, into)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    // A complete but empty BER sequence has no message id / protoop elements;
+    // popping them used to panic in `expect("element")`.
+    #[test]
+    fn decode_inner_empty_sequence_is_error() {
+        let mut buf = BytesMut::from(&b"\x30\x00"[..]);
+        assert!(decode_inner(&mut buf).is_err());
+    }
+
+    // A truncated frame is incomplete, not malformed: return Ok(None) so the
+    // codec waits for more bytes.
+    #[test]
+    fn decode_inner_incomplete_is_none() {
+        let mut buf = BytesMut::from(&b"\x30\x05"[..]);
+        assert!(matches!(decode_inner(&mut buf), Ok(None)));
     }
 }

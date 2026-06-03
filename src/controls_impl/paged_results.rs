@@ -1,4 +1,5 @@
 use super::{ControlParser, MakeCritical, RawControl};
+use crate::result::{LdapError, Result};
 
 use bytes::BytesMut;
 
@@ -52,33 +53,45 @@ impl From<PagedResults> for RawControl {
     }
 }
 
-impl ControlParser for PagedResults {
-    fn parse(val: &[u8]) -> PagedResults {
+impl PagedResults {
+    /// Parse a Paged Results control value, returning a decoding error on a
+    /// malformed or unexpected value.
+    pub fn try_parse(val: &[u8]) -> Result<PagedResults> {
+        fn decode<S: Into<String>>(msg: S) -> LdapError {
+            LdapError::DecodingError(msg.into())
+        }
+
         let mut pr_comps = match parse_tag(val) {
             Ok((_, tag)) => tag,
-            _ => panic!("failed to parse paged results value components"),
+            _ => return Err(decode("failed to parse paged results value components")),
         }
         .expect_constructed()
-        .expect("paged results components")
+        .ok_or_else(|| decode("paged results components"))?
         .into_iter();
         let size = match parse_uint(
             pr_comps
                 .next()
-                .expect("element")
+                .ok_or_else(|| decode("missing paged results size element"))?
                 .match_class(TagClass::Universal)
                 .and_then(|t| t.match_id(Types::Integer as u64))
                 .and_then(|t| t.expect_primitive())
-                .expect("paged results size")
+                .ok_or_else(|| decode("paged results size"))?
                 .as_slice(),
         ) {
             Ok((_, size)) => size as i32,
-            _ => panic!("failed to parse size"),
+            _ => return Err(decode("failed to parse size")),
         };
         let cookie = pr_comps
             .next()
-            .expect("element")
+            .ok_or_else(|| decode("missing paged results cookie element"))?
             .expect_primitive()
-            .expect("octet string");
-        PagedResults { size, cookie }
+            .ok_or_else(|| decode("paged results cookie octet string"))?;
+        Ok(PagedResults { size, cookie })
+    }
+}
+
+impl ControlParser for PagedResults {
+    fn parse(val: &[u8]) -> PagedResults {
+        PagedResults::try_parse(val).expect("paged results")
     }
 }

@@ -28,8 +28,8 @@ async fn main() -> Result<()> {
         .await?;
     while let Some(entry) = search.next().await? {
         let entry = SearchEntry::construct(entry);
-        println!("{:?}", entry);
+        println!("{entry:?}");
     }
     let _res = search.finish().await.success()?;
-    Ok(ldap.unbind().await?)
+    ldap.unbind().await
 }

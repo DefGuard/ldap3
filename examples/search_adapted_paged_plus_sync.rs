@@ -23,8 +23,8 @@ fn main() -> Result<()> {
     )?;
     while let Some(entry) = search.next()? {
         let entry = SearchEntry::construct(entry);
-        println!("{:?}", entry);
+        println!("{entry:?}");
     }
     let _res = search.result().success()?;
-    Ok(ldap.unbind()?)
+    ldap.unbind()
 }

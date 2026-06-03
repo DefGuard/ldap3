@@ -5,6 +5,8 @@ use lber::structure::{PL, StructureTag};
 use lber::structures::{ASNTag, Boolean, OctetString, Sequence, Tag};
 use lber::universal::Types;
 
+use crate::result::{LdapError, Result};
+
 /// Recognized control types.
 ///
 /// The variants can't be exhaustively matched, since the list of
@@ -26,8 +28,8 @@ mod assertion;
 pub use self::assertion::Assertion;
 
 mod content_sync;
-pub use self::content_sync::parse_syncinfo;
 pub use self::content_sync::{EntryState, RefreshMode, SyncDone, SyncInfo, SyncRequest, SyncState};
+pub use self::content_sync::{parse_syncinfo, try_parse_syncinfo};
 
 mod paged_results;
 pub use self::paged_results::PagedResults;
@@ -201,19 +203,29 @@ pub fn build_tag(rc: RawControl) -> StructureTag {
     .into_structure()
 }
 
-pub fn parse_controls(t: StructureTag) -> Vec<Control> {
-    let tags = t.expect_constructed().expect("result sequence").into_iter();
+pub fn parse_controls(t: StructureTag) -> Result<Vec<Control>> {
+    fn decode<S: Into<String>>(msg: S) -> LdapError {
+        LdapError::DecodingError(msg.into())
+    }
+
+    let tags = t
+        .expect_constructed()
+        .ok_or_else(|| decode("control result sequence"))?
+        .into_iter();
     let mut ctrls = Vec::new();
     for ctrl in tags {
-        let mut components = ctrl.expect_constructed().expect("components").into_iter();
+        let mut components = ctrl
+            .expect_constructed()
+            .ok_or_else(|| decode("control components"))?
+            .into_iter();
         let ctype = String::from_utf8(
             components
                 .next()
-                .expect("element")
+                .ok_or_else(|| decode("missing control type element"))?
                 .expect_primitive()
-                .expect("octet string"),
+                .ok_or_else(|| decode("control type octet string"))?,
         )
-        .expect("control type");
+        .map_err(|e| decode(format!("control type is not valid UTF-8: {e}")))?;
         let next = components.next();
         let (crit, maybe_val) = match next {
             None => (false, None),
@@ -221,18 +233,72 @@ pub fn parse_controls(t: StructureTag) -> Vec<Control> {
                 StructureTag {
                     id, ref payload, ..
                 } if id == Types::Boolean as u64 => match *payload {
-                    PL::P(ref v) => (v[0] != 0, components.next()),
-                    PL::C(_) => panic!("decoding error"),
+                    PL::P(ref v) => (v.first().is_some_and(|b| *b != 0), components.next()),
+                    PL::C(_) => return Err(decode("control criticality not primitive")),
                 },
                 StructureTag { id, .. } if id == Types::OctetString as u64 => {
                     (false, Some(c.clone()))
                 }
-                _ => panic!("decoding error"),
+                _ => return Err(decode("unexpected control component")),
             },
         };
-        let val = maybe_val.map(|v| v.expect_primitive().expect("octet string"));
+        let val = match maybe_val {
+            None => None,
+            Some(v) => Some(
+                v.expect_primitive()
+                    .ok_or_else(|| decode("control value octet string"))?,
+            ),
+        };
         let known_type = CONTROLS.get(&*ctype).copied();
         ctrls.push(Control(known_type, RawControl { ctype, crit, val }));
     }
-    ctrls
+    Ok(ctrls)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    // A primitive top-level tag is not a control sequence; this used to panic
+    // in `expect("result sequence")`.
+    #[test]
+    fn parse_controls_non_sequence_is_error() {
+        let tag = Tag::OctetString(OctetString {
+            inner: b"not a sequence".to_vec(),
+            ..Default::default()
+        })
+        .into_structure();
+        assert!(matches!(
+            parse_controls(tag),
+            Err(LdapError::DecodingError(_))
+        ));
+    }
+
+    // A control whose entry is a bare primitive (not a sequence of components)
+    // used to panic in `expect("components")`.
+    #[test]
+    fn parse_controls_non_sequence_entry_is_error() {
+        let tag = Tag::Sequence(Sequence {
+            inner: vec![Tag::OctetString(OctetString {
+                inner: b"bogus".to_vec(),
+                ..Default::default()
+            })],
+            ..Default::default()
+        })
+        .into_structure();
+        assert!(matches!(
+            parse_controls(tag),
+            Err(LdapError::DecodingError(_))
+        ));
+    }
+
+    #[test]
+    fn parse_controls_empty_is_ok() {
+        let tag = Tag::Sequence(Sequence {
+            inner: vec![],
+            ..Default::default()
+        })
+        .into_structure();
+        assert!(matches!(parse_controls(tag), Ok(v) if v.is_empty()));
+    }
 }

@@ -20,6 +20,6 @@ fn main() -> Result<()> {
             ],
         )?
         .success()?;
-    println!("{:?}", res);
-    Ok(ldap.unbind()?)
+    println!("{res:?}");
+    ldap.unbind()
 }

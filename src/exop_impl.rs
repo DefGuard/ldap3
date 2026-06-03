@@ -1,6 +1,8 @@
 use lber::common::TagClass;
 use lber::structures::{OctetString, Tag};
 
+use crate::result::{LdapError, Result};
+
 mod whoami;
 pub use self::whoami::{WhoAmI, WhoAmIResp};
 
@@ -43,12 +45,12 @@ pub trait ExopParser {
     fn parse(val: &[u8]) -> Self;
 }
 
-pub fn construct_exop(exop: Exop) -> Vec<Tag> {
-    assert!(exop.name.is_some());
+pub fn construct_exop(exop: Exop) -> Result<Vec<Tag>> {
+    let name = exop.name.ok_or(LdapError::EmptyExopName)?;
     let mut seq = vec![Tag::OctetString(OctetString {
         id: 0,
         class: TagClass::Context,
-        inner: exop.name.unwrap().into_bytes(),
+        inner: name.into_bytes(),
     })];
     if let Some(val) = exop.val {
         seq.push(Tag::OctetString(OctetString {
@@ -57,5 +59,31 @@ pub fn construct_exop(exop: Exop) -> Vec<Tag> {
             inner: val,
         }));
     }
-    seq
+    Ok(seq)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn construct_exop_without_name_is_error() {
+        let exop = Exop {
+            name: None,
+            val: Some(vec![1, 2, 3]),
+        };
+        assert!(matches!(
+            construct_exop(exop),
+            Err(LdapError::EmptyExopName)
+        ));
+    }
+
+    #[test]
+    fn construct_exop_with_name_is_ok() {
+        let exop = Exop {
+            name: Some(String::from("1.2.3")),
+            val: None,
+        };
+        assert!(construct_exop(exop).is_ok());
+    }
 }

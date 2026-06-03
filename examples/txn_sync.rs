@@ -42,7 +42,7 @@ fn main() -> Result<()> {
 
     if expo.val.is_some() {
         let end_txn = expo.parse::<EndTxnResp>();
-        println!("{:?}", end_txn);
+        println!("{end_txn:?}");
     }
-    Ok(ldap.unbind()?)
+    ldap.unbind()
 }

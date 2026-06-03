@@ -29,5 +29,5 @@ async fn main() -> Result<()> {
     let _res = stream.finish().await;
     let msgid = stream.ldap_handle().last_id();
     ldap.abandon(msgid).await?;
-    Ok(ldap.unbind().await?)
+    ldap.unbind().await
 }

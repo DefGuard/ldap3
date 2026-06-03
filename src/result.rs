@@ -17,7 +17,7 @@ use crate::ldap::SaslCreds;
 use crate::protocol::MiscSender;
 use crate::protocol::{LdapOp, MaybeControls, ResultSender};
 use crate::search::ResultEntry;
-use crate::search::parse_refs;
+use crate::search::try_parse_refs;
 
 use lber::common::TagClass;
 use lber::parse::parse_uint;
@@ -45,6 +45,10 @@ pub enum LdapError {
     /// The existing stream in `LdapConnectionSettings` doesn't match the URL.
     #[error("the stream type in LdapConnSettings does not match the URL")]
     MismatchedStreamType,
+
+    /// The URL has no host component for a network scheme.
+    #[error("missing host in LDAP URL")]
+    EmptyHost,
 
     /// Encapsulated I/O error.
     #[error("I/O error: {source}")]
@@ -96,6 +100,10 @@ pub enum LdapError {
     #[error("premature end of search stream")]
     EndOfStream,
 
+    /// A protocol message from the server was malformed or unexpected.
+    #[error("protocol decoding error: {0}")]
+    DecodingError(String),
+
     /// URL parsing error.
     #[error("url parse error: {source}")]
     UrlParsing {
@@ -142,6 +150,10 @@ pub enum LdapError {
     #[error("empty value set for Add")]
     AddNoValues,
 
+    /// No name provided for an extended operation request.
+    #[error("missing name in extended operation request")]
+    EmptyExopName,
+
     /// No values provided for the Add operation.
     #[error("adapter init error: {0}")]
     AdapterInit(String),
@@ -186,7 +198,7 @@ impl From<LdapError> for io::Error {
     fn from(le: LdapError) -> io::Error {
         match le {
             LdapError::Io { source, .. } => source,
-            _ => io::Error::new(io::ErrorKind::Other, format!("{}", le)),
+            _ => io::Error::other(format!("{le}")),
         }
     }
 }
@@ -227,6 +239,14 @@ pub struct LdapResult {
 impl From<Tag> for LdapResult {
     fn from(t: Tag) -> LdapResult {
         <LdapResultExt as From<Tag>>::from(t).0
+    }
+}
+
+impl LdapResult {
+    /// Parse an LDAP result message, returning a decoding error on a malformed
+    /// or unexpected protocol message.
+    pub(crate) fn try_from_tag(t: Tag) -> Result<LdapResult> {
+        Ok(LdapResultExt::try_from_tag(t)?.0)
     }
 }
 
@@ -318,12 +338,46 @@ impl LdapResult {
 #[derive(Clone, Debug)]
 pub(crate) struct LdapResultExt(pub LdapResult, pub Exop, pub SaslCreds);
 
+#[doc(hidden)]
 impl From<Tag> for LdapResultExt {
     fn from(t: Tag) -> LdapResultExt {
+        match LdapResultExt::try_from_tag(t) {
+            Ok(ext) => ext,
+            Err(e) => {
+                // Preserve the historical infallible API: rather than aborting,
+                // synthesize a protocolError result so callers see a non-zero rc.
+                warn!("failed to parse LDAP result: {e}");
+                LdapResultExt(
+                    LdapResult {
+                        rc: 2, // protocolError
+                        matched: String::from(""),
+                        text: format!("{e}"),
+                        refs: vec![],
+                        ctrls: vec![],
+                    },
+                    Exop {
+                        name: None,
+                        val: None,
+                    },
+                    SaslCreds(None),
+                )
+            }
+        }
+    }
+}
+
+impl LdapResultExt {
+    /// Parse an LDAP result message, returning a decoding error on a malformed
+    /// or unexpected protocol message.
+    pub(crate) fn try_from_tag(t: Tag) -> Result<LdapResultExt> {
+        fn decode<S: Into<String>>(msg: S) -> LdapError {
+            LdapError::DecodingError(msg.into())
+        }
+
         let t = match t {
             Tag::StructureTag(t) => t,
             Tag::Null(_) => {
-                return LdapResultExt(
+                return Ok(LdapResultExt(
                     LdapResult {
                         rc: 0,
                         matched: String::from(""),
@@ -336,37 +390,40 @@ impl From<Tag> for LdapResultExt {
                         val: None,
                     },
                     SaslCreds(None),
-                );
+                ));
             }
-            _ => unimplemented!(),
+            _ => return Err(decode("unexpected top-level tag in result")),
         };
-        let mut tags = t.expect_constructed().expect("result sequence").into_iter();
+        let mut tags = t
+            .expect_constructed()
+            .ok_or_else(|| decode("result sequence"))?
+            .into_iter();
         let rc = match parse_uint(
             tags.next()
-                .expect("element")
+                .ok_or_else(|| decode("missing result code element"))?
                 .match_class(TagClass::Universal)
                 .and_then(|t| t.match_id(Types::Enumerated as u64))
                 .and_then(|t| t.expect_primitive())
-                .expect("result code")
+                .ok_or_else(|| decode("result code"))?
                 .as_slice(),
         ) {
             Ok((_, rc)) => rc as u32,
-            _ => panic!("failed to parse result code"),
+            _ => return Err(decode("failed to parse result code")),
         };
         let matched = String::from_utf8(
             tags.next()
-                .expect("element")
+                .ok_or_else(|| decode("missing matched DN element"))?
                 .expect_primitive()
-                .expect("octet string"),
+                .ok_or_else(|| decode("matched DN octet string"))?,
         )
-        .expect("matched dn");
+        .map_err(|e| decode(format!("matched DN is not valid UTF-8: {e}")))?;
         let text = String::from_utf8(
             tags.next()
-                .expect("element")
+                .ok_or_else(|| decode("missing diagnostic message element"))?
                 .expect_primitive()
-                .expect("octet string"),
+                .ok_or_else(|| decode("diagnostic message octet string"))?,
         )
-        .expect("diagnostic message");
+        .map_err(|e| decode(format!("diagnostic message is not valid UTF-8: {e}")))?;
         let mut refs = Vec::new();
         let mut exop_name = None;
         let mut exop_val = None;
@@ -376,25 +433,34 @@ impl From<Tag> for LdapResultExt {
                 None => break,
                 Some(comp) => match comp.id {
                     3 => {
-                        refs.extend(parse_refs(comp));
+                        refs.extend(try_parse_refs(comp)?);
                     }
                     7 => {
-                        sasl_creds = Some(comp.expect_primitive().expect("octet string"));
+                        sasl_creds = Some(
+                            comp.expect_primitive()
+                                .ok_or_else(|| decode("SASL credentials octet string"))?,
+                        );
                     }
                     10 => {
                         exop_name = Some(
-                            String::from_utf8(comp.expect_primitive().expect("octet string"))
-                                .expect("exop name"),
+                            String::from_utf8(
+                                comp.expect_primitive()
+                                    .ok_or_else(|| decode("exop name octet string"))?,
+                            )
+                            .map_err(|e| decode(format!("exop name is not valid UTF-8: {e}")))?,
                         );
                     }
                     11 => {
-                        exop_val = Some(comp.expect_primitive().expect("octet string"));
+                        exop_val = Some(
+                            comp.expect_primitive()
+                                .ok_or_else(|| decode("exop value octet string"))?,
+                        );
                     }
                     _ => (),
                 },
             }
         }
-        LdapResultExt(
+        Ok(LdapResultExt(
             LdapResult {
                 rc,
                 matched,
@@ -407,7 +473,7 @@ impl From<Tag> for LdapResultExt {
                 val: exop_val,
             },
             SaslCreds(sasl_creds),
-        )
+        ))
     }
 }
 
@@ -501,5 +567,97 @@ impl ExopResult {
         } else {
             Err(LdapError::from(self.1))
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use lber::structure::{PL, StructureTag};
+
+    fn prim(class: TagClass, id: u64, val: &[u8]) -> StructureTag {
+        StructureTag {
+            class,
+            id,
+            payload: PL::P(val.to_vec()),
+        }
+    }
+
+    // A bare primitive tag is not a valid result sequence and used to panic
+    // in `expect_constructed`. It must now surface as a decoding error.
+    #[test]
+    fn try_from_tag_primitive_is_error() {
+        let tag = Tag::StructureTag(prim(TagClass::Application, 5, b""));
+        match LdapResultExt::try_from_tag(tag) {
+            Err(LdapError::DecodingError(_)) => {}
+            other => panic!("expected DecodingError, got {other:?}"),
+        }
+    }
+
+    // An unexpected top-level tag variant used to hit `unimplemented!()`.
+    #[test]
+    fn try_from_tag_unexpected_variant_is_error() {
+        use lber::structures::Integer;
+        let tag = Tag::Integer(Integer {
+            inner: 1,
+            ..Default::default()
+        });
+        match LdapResultExt::try_from_tag(tag) {
+            Err(LdapError::DecodingError(_)) => {}
+            other => panic!("expected DecodingError, got {other:?}"),
+        }
+    }
+
+    // A result sequence missing the result-code element used to hit
+    // `expect("element")`.
+    #[test]
+    fn try_from_tag_missing_result_code_is_error() {
+        let tag = Tag::StructureTag(StructureTag {
+            class: TagClass::Application,
+            id: 5,
+            payload: PL::C(vec![]),
+        });
+        match LdapResultExt::try_from_tag(tag) {
+            Err(LdapError::DecodingError(_)) => {}
+            other => panic!("expected DecodingError, got {other:?}"),
+        }
+    }
+
+    // A Null tag is the success sentinel, not a malformed message.
+    #[test]
+    fn try_from_tag_null_is_success() {
+        let tag = Tag::Null(Default::default());
+        let ext = LdapResultExt::try_from_tag(tag).expect("null parses");
+        assert_eq!(ext.0.rc, 0);
+    }
+
+    #[test]
+    fn try_from_tag_wellformed() {
+        let tag = Tag::StructureTag(StructureTag {
+            class: TagClass::Application,
+            id: 5,
+            payload: PL::C(vec![
+                prim(TagClass::Universal, Types::Enumerated as u64, &[0]),
+                prim(
+                    TagClass::Universal,
+                    Types::OctetString as u64,
+                    b"cn=matched",
+                ),
+                prim(TagClass::Universal, Types::OctetString as u64, b"diag"),
+            ]),
+        });
+        let res = LdapResult::try_from_tag(tag).expect("wellformed parses");
+        assert_eq!(res.rc, 0);
+        assert_eq!(res.matched, "cn=matched");
+        assert_eq!(res.text, "diag");
+    }
+
+    // The search-done path in the connection loop relies on this: a malformed
+    // message becomes an rc=2 result so the search terminates instead of hanging.
+    #[test]
+    fn from_tag_malformed_is_protocol_error() {
+        let tag = Tag::StructureTag(prim(TagClass::Application, 5, b""));
+        let res: LdapResult = tag.into();
+        assert_eq!(res.rc, 2);
     }
 }

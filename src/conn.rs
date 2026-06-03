@@ -17,7 +17,7 @@ use crate::RequestId;
 use crate::exop_impl::StartTLS;
 use crate::ldap::Ldap;
 use crate::protocol::{ItemSender, LdapCodec, LdapOp, MaybeControls, MiscSender, ResultSender};
-use crate::result::{LdapError, Result};
+use crate::result::{LdapError, LdapResult, Result};
 use crate::search::SearchItem;
 
 use lber::structures::{Null, Tag};
@@ -494,16 +494,16 @@ impl LdapConnAsync {
             port = url_port;
         }
         let (_hostname, host_port) = match url.host_str() {
-            Some("") => ("localhost", format!("localhost:{}", port)),
-            Some(h) => (h, format!("{}:{}", h, port)),
-            _ => panic!("unexpected None from url.host_str()"),
+            Some("") => ("localhost", format!("localhost:{port}")),
+            Some(h) => (h, format!("{h}:{port}")),
+            None => return Err(LdapError::EmptyHost),
         };
         let stream = match settings.std_stream {
             None => TcpStream::connect(host_port.as_str()).await?,
             Some(StdStream::Tcp(_)) => {
-                let stream = match settings.std_stream.take().expect("StdStream") {
-                    StdStream::Tcp(stream) => stream,
-                    _ => panic!("non-tcp stream in enum"),
+                let stream = match settings.std_stream.take() {
+                    Some(StdStream::Tcp(stream)) => stream,
+                    _ => return Err(LdapError::MismatchedStreamType),
                 };
                 stream.set_nonblocking(true)?;
                 TcpStream::from_std(stream)?
@@ -534,7 +534,7 @@ impl LdapConnAsync {
                 let tls_stream = if let ConnType::Tcp(stream) = parts.io {
                     LdapConnAsync::create_tls_stream(settings, _hostname, stream).await?
                 } else {
-                    panic!("underlying stream not TCP");
+                    return Err(LdapError::MismatchedStreamType);
                 };
                 #[cfg(any(feature = "gssapi", feature = "ntlm"))]
                 {
@@ -544,7 +544,7 @@ impl LdapConnAsync {
                 conn.stream = parts.codec.framed(ConnType::Tls(tls_stream));
                 ldap.has_tls = true;
             }
-            _ => unimplemented!(),
+            s => return Err(LdapError::UnknownScheme(String::from(s))),
         }
         Ok((conn, ldap))
     }
@@ -557,7 +557,7 @@ impl LdapConnAsync {
     ) -> Result<TlsStream<TcpStream>> {
         let connector = match settings.connector {
             Some(connector) => connector,
-            None => LdapConnAsync::create_connector(&settings),
+            None => LdapConnAsync::create_connector(&settings)?,
         };
         TokioTlsConnector::from(connector)
             .connect(hostname, stream)
@@ -612,12 +612,12 @@ impl LdapConnAsync {
     }
 
     #[cfg(feature = "tls-native")]
-    fn create_connector(settings: &LdapConnSettings) -> TlsConnector {
+    fn create_connector(settings: &LdapConnSettings) -> Result<TlsConnector> {
         let mut builder = TlsConnector::builder();
         if settings.no_tls_verify {
             builder.danger_accept_invalid_certs(true);
         }
-        builder.build().expect("connector")
+        Ok(builder.build()?)
     }
 
     #[cfg(all(any(feature = "gssapi", feature = "ntlm"), feature = "tls-native"))]
@@ -772,7 +772,7 @@ impl LdapConnAsync {
                             self.searchmap.insert(id, search_tx.clone());
                         }
                         if let Err(e) = self.stream.send((id, tag, controls)).await {
-                            warn!("socket send error: {}", e);
+                            warn!("socket send error: {e}");
                             return Err(LdapError::from(e));
                         } else {
                             match op {
@@ -789,15 +789,15 @@ impl LdapConnAsync {
                                 },
                                 LdapOp::Unbind => {
                                     if let Err(e) = self.stream.get_mut().shutdown().await {
-                                        warn!("socket shutdown error: {}", e);
+                                        warn!("socket shutdown error: {e}");
                                     }
                                     if let Err(e) = self.stream.close().await {
-                                        warn!("socket close error: {}", e);
+                                        warn!("socket close error: {e}");
                                     }
                                 },
                             }
                             if let Err(e) = tx.send((Tag::Null(Null { ..Default::default() }), vec![])) {
-                                warn!("ldap null result send error: {:?}", e);
+                                warn!("ldap null result send error: {e:?}");
                             }
                         }
                     } else {
@@ -812,10 +812,10 @@ impl LdapConnAsync {
                                 match self.get_peer_certificate() {
                                     Ok(v) => {
                                         if let Err(e) = tx.send(v) {
-                                            warn!("Couldn't send peer certificate over channel: {:?}", e);
+                                            warn!("Couldn't send peer certificate over channel: {e:?}");
                                         }
                                     },
-                                    Err(e) => warn!("Couldn't get peer certificate: {}", e),
+                                    Err(e) => warn!("Couldn't get peer certificate: {e}"),
                                 }
                             },
                         }
@@ -827,38 +827,60 @@ impl LdapConnAsync {
                     let (id, (tag, controls)) = match resp {
                         None => break,
                         Some(Err(e)) => {
-                            warn!("socket receive error: {}", e);
+                            warn!("socket receive error: {e}");
                             return Err(LdapError::from(e));
                         },
                         Some(Ok(resp)) => resp,
                     };
                     if let Some(tx) = self.searchmap.get(&id) {
-                        let protoop = if let Tag::StructureTag(protoop) = tag {
-                            protoop
-                        } else {
-                            panic!("unmatched tag structure: {:?}", tag);
+                        let item = match tag {
+                            Tag::StructureTag(protoop) => match protoop.id {
+                                4 | 25 => Some((SearchItem::Entry(protoop), false)),
+                                5 => {
+                                    let res = LdapResult::try_from_tag(Tag::StructureTag(protoop))
+                                        .unwrap_or_else(|e| {
+                                            // Synthesize a protocolError result so the search
+                                            // terminates with a non-zero rc instead of hanging on
+                                            // a Done message that is never delivered.
+                                            warn!("ldap search done parse error, op={id}: {e}");
+                                            LdapResult {
+                                                rc: 2, // protocolError
+                                                matched: String::from(""),
+                                                text: format!("{e}"),
+                                                refs: vec![],
+                                                ctrls: vec![],
+                                            }
+                                        });
+                                    Some((SearchItem::Done(res), true))
+                                }
+                                19 => Some((SearchItem::Referral(protoop), false)),
+                                other => {
+                                    warn!("unrecognized op id {other}, op={id}, skipping message");
+                                    None
+                                }
+                            },
+                            other => {
+                                warn!("unmatched tag structure, op={id}, skipping message: {other:?}");
+                                None
+                            }
                         };
-                        let (item, mut remove) = match protoop.id {
-                            4 | 25 => (SearchItem::Entry(protoop), false),
-                            5 => (SearchItem::Done(Tag::StructureTag(protoop).into()), true),
-                            19 => (SearchItem::Referral(protoop), false),
-                            _ => panic!("unrecognized op id: {}", protoop.id),
-                        };
-                        if let Err(e) = tx.send((item, controls)) {
-                            warn!("ldap search item send error, op={}: {:?}", id, e);
-                            remove = true;
-                        }
-                        if remove {
-                            self.searchmap.remove(&id);
+                        if let Some((item, mut remove)) = item {
+                            if let Err(e) = tx.send((item, controls)) {
+                                warn!("ldap search item send error, op={id}: {e:?}");
+                                remove = true;
+                            }
+                            if remove {
+                                self.searchmap.remove(&id);
+                            }
                         }
                     } else if let Some(tx) = self.resultmap.remove(&id) {
                         if let Err(e) = tx.send((tag, controls)) {
-                            warn!("ldap result send error: {:?}", e);
+                            warn!("ldap result send error: {e:?}");
                         }
                         let mut msgmap = self.msgmap.lock().expect("msgmap mutex (stream rx)");
                         msgmap.1.remove(&id);
                     } else {
-                        warn!("unmatched id: {}", id);
+                        warn!("unmatched id: {id}");
                     }
                 },
             };

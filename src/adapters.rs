@@ -400,15 +400,29 @@ where
                     for (cno, ctrl) in ctrls.iter().enumerate() {
                         if let Control(Some(ControlType::PagedResults), ref raw) = *ctrl {
                             pr_index = Some(cno);
-                            let pr: controls::PagedResults = raw.parse();
+                            let pr = controls::PagedResults::try_parse(
+                                raw.val.as_deref().ok_or_else(|| {
+                                    LdapError::DecodingError(String::from(
+                                        "paged results control without value",
+                                    ))
+                                })?,
+                            )?;
                             if pr.cookie.is_empty() {
                                 break;
                             }
-                            let ldap_ref = self.ldap.as_ref().expect("ldap_ref");
+                            let ldap_ref = self.ldap.as_ref().ok_or_else(|| {
+                                LdapError::AdapterInit(String::from(
+                                    "paged results adapter used before start",
+                                ))
+                            })?;
                             let mut ldap = ldap_ref.clone();
                             ldap.timeout = ldap_ref.timeout;
                             ldap.search_opts = ldap_ref.search_opts.clone();
-                            let mut controls = ldap_ref.controls.clone().expect("saved ctrls");
+                            let mut controls = ldap_ref.controls.clone().ok_or_else(|| {
+                                LdapError::AdapterInit(String::from(
+                                    "paged results adapter missing saved controls",
+                                ))
+                            })?;
                             controls.push(
                                 controls::PagedResults {
                                     size: self.page_size,
@@ -417,13 +431,13 @@ where
                                 .into(),
                             );
                             ldap.controls = Some(controls);
+                            let attrs = self.attrs.as_ref().ok_or_else(|| {
+                                LdapError::AdapterInit(String::from(
+                                    "paged results adapter missing saved attributes",
+                                ))
+                            })?;
                             let new_stream = match ldap
-                                .streaming_search(
-                                    &self.base,
-                                    self.scope,
-                                    &self.filter,
-                                    self.attrs.as_ref().unwrap(),
-                                )
+                                .streaming_search(&self.base, self.scope, &self.filter, attrs)
                                 .await
                             {
                                 Ok(strm) => strm,

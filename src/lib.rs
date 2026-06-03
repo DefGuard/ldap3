@@ -204,7 +204,6 @@ pub mod controls {
     //! # Ok(())
     //! # }
     pub use crate::controls_impl::TxnSpec;
-    pub use crate::controls_impl::parse_syncinfo;
     pub use crate::controls_impl::{
         Assertion, ManageDsaIt, MatchedValues, PagedResults, ProxyAuth, RelaxRules,
     };
@@ -216,6 +215,7 @@ pub mod controls {
         EntryState, RefreshMode, SyncDone, SyncInfo, SyncRequest, SyncState,
     };
     pub use crate::controls_impl::{PostRead, PostReadResp, PreRead, PreReadResp, ReadEntryResp};
+    pub use crate::controls_impl::{parse_syncinfo, try_parse_syncinfo};
 }
 mod controls_impl;
 mod exop_impl;
@@ -250,10 +250,10 @@ pub use conn::{LdapConnAsync, LdapConnSettings, StdStream};
 pub use filter::parse as parse_filter;
 pub use ldap::{Ldap, Mod};
 pub use result::{LdapError, LdapResult, SearchResult};
-pub use search::parse_refs;
 pub use search::{
     DerefAliases, ResultEntry, Scope, SearchEntry, SearchOptions, SearchStream, StreamState,
 };
+pub use search::{parse_refs, try_parse_refs};
 #[cfg(feature = "sync")]
 pub use sync::{EntryStream, LdapConn};
 pub use util::{LdapUrlExt, LdapUrlParams, dn_escape, get_url_params, ldap_escape, ldap_unescape};

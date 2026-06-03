@@ -22,10 +22,10 @@ async fn main() -> Result<()> {
         .await?;
     while let Some(entry) = search.next().await? {
         let entry = SearchEntry::construct(entry);
-        println!("{:?}", entry);
+        println!("{entry:?}");
     }
     let res = search.finish().await.success()?;
-    println!("{:?}", res);
+    println!("{res:?}");
     println!("--- all objects");
     let mut search = ldap
         .streaming_search(
@@ -40,10 +40,10 @@ async fn main() -> Result<()> {
             println!("refs: {:?}", parse_refs(entry.0));
         } else {
             let entry = SearchEntry::construct(entry);
-            println!("{:?}", entry);
+            println!("{entry:?}");
         }
     }
     let res = search.finish().await.success()?;
-    println!("{:?}", res);
-    Ok(ldap.unbind().await?)
+    println!("{res:?}");
+    ldap.unbind().await
 }

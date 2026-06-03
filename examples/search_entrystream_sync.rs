@@ -20,7 +20,7 @@ fn main() -> Result<()> {
     )?;
     while let Some(entry) = search.next()? {
         let entry = SearchEntry::construct(entry);
-        println!("{:?}", entry);
+        println!("{entry:?}");
     }
     // The following two statements show how one would
     // Abandon a Search. The statements are commented out
@@ -33,5 +33,5 @@ fn main() -> Result<()> {
     //let msgid = search.last_id();
     //ldap.abandon(msgid)?;
     let _res = search.result().success()?;
-    Ok(ldap.unbind()?)
+    ldap.unbind()
 }

@@ -43,6 +43,6 @@ fn main() -> Result<()> {
         .with_controls(RelaxRules.critical())
         .modify("uid=inejge,ou=People,dc=example,dc=org", mod_vec)?
         .success()?;
-    println!("{:?}", res);
-    Ok(ldap.unbind()?)
+    println!("{res:?}");
+    ldap.unbind()
 }

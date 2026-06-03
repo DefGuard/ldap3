@@ -1,4 +1,5 @@
 use super::{Exop, ExopParser};
+use crate::result::{LdapError, Result};
 
 use bytes::BytesMut;
 
@@ -84,26 +85,51 @@ impl<'a> From<PasswordModify<'a>> for Exop {
     }
 }
 
-impl ExopParser for PasswordModifyResp {
-    fn parse(val: &[u8]) -> PasswordModifyResp {
+impl PasswordModifyResp {
+    /// Parse a Password Modify response value, returning a decoding error on a
+    /// malformed or unexpected value.
+    pub fn try_parse(val: &[u8]) -> Result<PasswordModifyResp> {
+        fn decode<S: Into<String>>(msg: S) -> LdapError {
+            LdapError::DecodingError(msg.into())
+        }
+
         let tags = match parse_tag(val) {
             Ok((_, tag)) => tag,
-            _ => panic!("failed to parse password modify return value"),
+            _ => return Err(decode("failed to parse password modify return value")),
         };
         let mut tags = tags
             .expect_constructed()
-            .expect("password modify sequence")
+            .ok_or_else(|| decode("password modify sequence"))?
             .into_iter();
         let gen_pass = tags
             .next()
-            .expect("element")
+            .ok_or_else(|| decode("missing generated password element"))?
             .match_class(TagClass::Context)
             .and_then(|t| t.match_id(0))
             .and_then(|t| t.expect_primitive())
-            .expect("generated password")
+            .ok_or_else(|| decode("generated password"))?
             .as_slice()
             .to_owned();
-        let gen_pass = String::from_utf8(gen_pass).expect("generated password not UTF-8");
-        PasswordModifyResp { gen_pass }
+        let gen_pass = String::from_utf8(gen_pass).map_err(|_| LdapError::DecodingUTF8)?;
+        Ok(PasswordModifyResp { gen_pass })
+    }
+}
+
+impl ExopParser for PasswordModifyResp {
+    fn parse(val: &[u8]) -> PasswordModifyResp {
+        PasswordModifyResp::try_parse(val).expect("password modify response")
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn password_modify_resp_garbage_is_error() {
+        assert!(matches!(
+            PasswordModifyResp::try_parse(&[0xff, 0xff]),
+            Err(LdapError::DecodingError(_))
+        ));
     }
 }
