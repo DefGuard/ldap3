@@ -1,19 +1,20 @@
-use crate::RequestId;
-use crate::adapters::IntoAdapterVec;
-use crate::conn::{LdapConnAsync, LdapConnSettings};
-use crate::controls_impl::IntoRawControlVec;
-use crate::exop::Exop;
-use crate::ldap::{Ldap, Mod};
-use crate::result::{CompareResult, ExopResult, LdapResult, Result, SearchResult};
-use crate::search::{ResultEntry, Scope, SearchOptions, SearchStream};
+use std::{collections::HashSet, hash::Hash, time::Duration};
+
 #[cfg(feature = "gssapi")]
 use cross_krb5::Cred;
-use std::collections::HashSet;
-use std::hash::Hash;
-use std::time::Duration;
-
 use tokio::runtime::{self, Runtime};
 use url::Url;
+
+use crate::{
+    RequestId,
+    adapters::IntoAdapterVec,
+    conn::{LdapConnAsync, LdapConnSettings},
+    controls_impl::IntoRawControlVec,
+    exop::Exop,
+    ldap::{Ldap, Mod},
+    result::{CompareResult, ExopResult, LdapResult, Result, SearchResult},
+    search::{ResultEntry, Scope, SearchOptions, SearchStream},
+};
 
 /// Synchronous connection to an LDAP server.
 ///

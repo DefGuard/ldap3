@@ -1,18 +1,20 @@
 #![allow(clippy::blocks_in_conditions)]
 #![allow(clippy::result_unit_err)]
 
-use lber::common::TagClass;
-use lber::structures::{Boolean, ExplicitTag, OctetString, Sequence, Tag};
-
-use nom::IResult;
-use nom::branch::alt;
-use nom::bytes::complete::{tag, take_while, take_while1};
-use nom::character::complete::digit1;
-use nom::character::{is_alphabetic, is_alphanumeric, is_hex_digit};
-use nom::combinator::{map, map_res, opt, recognize, verify};
-use nom::multi::{fold_many0, many0, many1};
-use nom::number::complete::be_u8;
-use nom::sequence::{delimited, preceded};
+use lber::{
+    common::TagClass,
+    structures::{Boolean, ExplicitTag, OctetString, Sequence, Tag},
+};
+use nom::{
+    IResult,
+    branch::alt,
+    bytes::complete::{tag, take_while, take_while1},
+    character::{complete::digit1, is_alphabetic, is_alphanumeric, is_hex_digit},
+    combinator::{map, map_res, opt, recognize, verify},
+    multi::{fold_many0, many0, many1},
+    number::complete::be_u8,
+    sequence::{delimited, preceded},
+};
 
 #[doc(hidden)]
 pub fn parse(input: impl AsRef<[u8]>) -> Result<Tag, ()> {
@@ -410,8 +412,7 @@ mod test {
 
     fn ber_vec_eq(filter: &str, ber: &[u8]) {
         use bytes::BytesMut;
-        use lber::structures::ASNTag;
-        use lber::write;
+        use lber::{structures::ASNTag, write};
 
         let mut buf = BytesMut::new();
         let tag = parse(filter).unwrap();

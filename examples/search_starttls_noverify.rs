@@ -5,8 +5,7 @@
 // 3. Ignoring an invalid X.509 certificate (self-signed and expired);
 // 4. Using a streaming Search.
 
-use ldap3::result::Result;
-use ldap3::{LdapConnAsync, LdapConnSettings, Scope, SearchEntry};
+use ldap3::{LdapConnAsync, LdapConnSettings, Scope, SearchEntry, result::Result};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -28,8 +27,8 @@ async fn main() -> Result<()> {
         .await?;
     while let Some(entry) = search.next().await? {
         let entry = SearchEntry::construct(entry);
-        println!("{:?}", entry);
+        println!("{entry:?}");
     }
     let _res = search.finish().await.success()?;
-    Ok(ldap.unbind().await?)
+    ldap.unbind().await
 }

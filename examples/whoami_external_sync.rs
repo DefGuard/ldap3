@@ -7,9 +7,11 @@
 //
 // Notice: only works on Unix (uses Unix domain sockets)
 
-use ldap3::LdapConn;
-use ldap3::exop::{WhoAmI, WhoAmIResp};
-use ldap3::result::Result;
+use ldap3::{
+    LdapConn,
+    exop::{WhoAmI, WhoAmIResp},
+    result::Result,
+};
 
 fn main() -> Result<()> {
     let mut ldap = LdapConn::new("ldapi://ldapi")?;
@@ -17,5 +19,5 @@ fn main() -> Result<()> {
     let (exop, _res) = ldap.extended(WhoAmI)?.success()?;
     let whoami: WhoAmIResp = exop.parse();
     println!("{}", whoami.authzid);
-    Ok(ldap.unbind()?)
+    ldap.unbind()
 }

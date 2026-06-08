@@ -1,16 +1,21 @@
 use std::collections::HashSet;
 
-use crate::ResultEntry;
-use crate::controls::{ControlParser, MakeCritical, RawControl};
-
 use bytes::BytesMut;
+use lber::{
+    IResult,
+    common::TagClass,
+    parse::{parse_tag, parse_uint},
+    structure::{PL, StructureTag},
+    structures::{ASNTag, Boolean, Enumerated, OctetString, Sequence, Tag},
+    universal::Types,
+    write,
+};
 
-use lber::common::TagClass;
-use lber::parse::{parse_tag, parse_uint};
-use lber::structure::{PL, StructureTag};
-use lber::structures::{ASNTag, Boolean, Enumerated, OctetString, Sequence, Tag};
-use lber::universal::Types;
-use lber::{IResult, write};
+use crate::{
+    ResultEntry,
+    controls::{ControlParser, MakeCritical, RawControl},
+    result::{LdapError, Result},
+};
 
 pub const SYNC_REQUEST_OID: &str = "1.3.6.1.4.1.4203.1.9.1.1";
 pub const SYNC_STATE_OID: &str = "1.3.6.1.4.1.4203.1.9.1.2";
@@ -99,46 +104,62 @@ pub enum EntryState {
     Delete,
 }
 
-impl ControlParser for SyncState {
-    fn parse(val: &[u8]) -> Self {
+impl SyncState {
+    /// Parse a Sync State control value, returning a decoding error on a
+    /// malformed or unexpected value.
+    pub fn try_parse(val: &[u8]) -> Result<Self> {
+        fn decode<S: Into<String>>(msg: S) -> LdapError {
+            LdapError::DecodingError(msg.into())
+        }
+
         let mut tags = match parse_tag(val) {
             IResult::Ok((_, tag)) => tag,
-            _ => panic!("syncstate: failed to parse tag"),
+            _ => return Err(decode("syncstate: failed to parse tag")),
         }
         .expect_constructed()
-        .expect("syncstate: elements")
+        .ok_or_else(|| decode("syncstate: elements"))?
         .into_iter();
         let state = match match parse_uint(
             tags.next()
-                .expect("syncstate: element 1")
+                .ok_or_else(|| decode("syncstate: missing state element"))?
                 .match_class(TagClass::Universal)
                 .and_then(|t| t.match_id(Types::Enumerated as u64))
                 .and_then(|t| t.expect_primitive())
-                .expect("syncstate: state")
+                .ok_or_else(|| decode("syncstate: state"))?
                 .as_slice(),
         ) {
             Ok((_, state)) => state,
-            _ => panic!("syncstate: failed to parse state"),
+            _ => return Err(decode("syncstate: failed to parse state")),
         } {
             0 => EntryState::Present,
             1 => EntryState::Add,
             2 => EntryState::Modify,
             3 => EntryState::Delete,
-            _ => panic!("syncstate: unknown state"),
+            _ => return Err(decode("syncstate: unknown state")),
         };
         let entry_uuid = tags
             .next()
-            .expect("syncstate: element 2")
+            .ok_or_else(|| decode("syncstate: missing entryUUID element"))?
             .expect_primitive()
-            .expect("syncstate: entryUUID");
-        let cookie = tags
-            .next()
-            .map(|tag| tag.expect_primitive().expect("syncstate: synCookie"));
-        SyncState {
+            .ok_or_else(|| decode("syncstate: entryUUID"))?;
+        let cookie = match tags.next() {
+            None => None,
+            Some(tag) => Some(
+                tag.expect_primitive()
+                    .ok_or_else(|| decode("syncstate: synCookie"))?,
+            ),
+        };
+        Ok(SyncState {
             state,
             entry_uuid,
             cookie,
-        }
+        })
+    }
+}
+
+impl ControlParser for SyncState {
+    fn parse(val: &[u8]) -> Self {
+        SyncState::try_parse(val).expect("syncstate")
     }
 }
 
@@ -149,14 +170,20 @@ pub struct SyncDone {
     pub refresh_deletes: bool,
 }
 
-impl ControlParser for SyncDone {
-    fn parse(val: &[u8]) -> Self {
+impl SyncDone {
+    /// Parse a Sync Done control value, returning a decoding error on a
+    /// malformed or unexpected value.
+    pub fn try_parse(val: &[u8]) -> Result<Self> {
+        fn decode<S: Into<String>>(msg: S) -> LdapError {
+            LdapError::DecodingError(msg.into())
+        }
+
         let tags = match parse_tag(val) {
             Ok((_, tag)) => tag,
-            _ => panic!("syncdone: failed to parse tag"),
+            _ => return Err(decode("syncdone: failed to parse tag")),
         }
         .expect_constructed()
-        .expect("syncdone: elements")
+        .ok_or_else(|| decode("syncdone: elements"))?
         .into_iter();
         let mut cookie = None;
         let mut refresh_deletes = false;
@@ -165,22 +192,28 @@ impl ControlParser for SyncDone {
                 StructureTag { id, payload, .. } if id == Types::OctetString as u64 => {
                     cookie = Some(match payload {
                         PL::P(ostr) => ostr,
-                        PL::C(_) => panic!("syncdone: constructed octet string?"),
+                        PL::C(_) => return Err(decode("syncdone: constructed octet string?")),
                     });
                 }
                 StructureTag { id, payload, .. } if id == Types::Boolean as u64 => {
                     refresh_deletes = match payload {
-                        PL::P(ostr) => ostr[0] != 0,
-                        PL::C(_) => panic!("syncdone: constructed boolean?"),
+                        PL::P(ostr) => ostr.first().is_some_and(|b| *b != 0),
+                        PL::C(_) => return Err(decode("syncdone: constructed boolean?")),
                     };
                 }
-                _ => panic!("syncdone: unrecognized component"),
+                _ => return Err(decode("syncdone: unrecognized component")),
             }
         }
-        SyncDone {
+        Ok(SyncDone {
             cookie,
             refresh_deletes,
-        }
+        })
+    }
+}
+
+impl ControlParser for SyncDone {
+    fn parse(val: &[u8]) -> Self {
+        SyncDone::try_parse(val).expect("syncdone")
     }
 }
 
@@ -204,43 +237,63 @@ pub enum SyncInfo {
 }
 
 /// Parse the Sync Info value from the Search result entry.
+///
+/// Panics on a malformed message; see [`try_parse_syncinfo`] for a fallible variant.
 pub fn parse_syncinfo(entry: ResultEntry) -> SyncInfo {
+    try_parse_syncinfo(entry).expect("syncinfo")
+}
+
+/// Parse the Sync Info value from the Search result entry, returning a decoding
+/// error on a malformed or unexpected message.
+pub fn try_parse_syncinfo(entry: ResultEntry) -> Result<SyncInfo> {
+    fn decode<S: Into<String>>(msg: S) -> LdapError {
+        LdapError::DecodingError(msg.into())
+    }
+
     let mut tags = entry
         .0
         .match_id(25)
         .and_then(|t| t.expect_constructed())
-        .expect("intermediate seq")
+        .ok_or_else(|| decode("syncinfo: intermediate seq"))?
         .into_iter();
     loop {
         match tags.next() {
-            None => panic!("syncinfo: out of tags"),
+            None => return Err(decode("syncinfo: out of tags")),
             Some(tag) if tag.id == 0 => {
-                let oid = String::from_utf8(tag.expect_primitive().expect("octet string"))
-                    .expect("intermediate oid");
+                let oid = String::from_utf8(
+                    tag.expect_primitive()
+                        .ok_or_else(|| decode("syncinfo: oid octet string"))?,
+                )
+                .map_err(|e| decode(format!("syncinfo: oid is not valid UTF-8: {e}")))?;
                 if oid != SYNC_INFO_OID {
-                    panic!("syncinfo: oid mismatch");
+                    return Err(decode("syncinfo: oid mismatch"));
                 }
             }
             Some(tag) if tag.id == 1 => {
-                let syncinfo_val =
-                    match parse_tag(tag.expect_primitive().expect("octet string").as_ref()) {
-                        Ok((_, tag)) => tag,
-                        _ => panic!("syncinfo: error parsing value"),
-                    };
+                let syncinfo_val = match parse_tag(
+                    tag.expect_primitive()
+                        .ok_or_else(|| decode("syncinfo: value octet string"))?
+                        .as_ref(),
+                ) {
+                    Ok((_, tag)) => tag,
+                    _ => return Err(decode("syncinfo: error parsing value")),
+                };
                 return match syncinfo_val {
                     StructureTag { id, class, payload } if class == TagClass::Context && id < 4 => {
                         match id {
                             0 => {
                                 let cookie = match payload {
                                     PL::P(payload) => payload,
-                                    PL::C(_) => panic!("syncinfo: [0] not primitive"),
+                                    PL::C(_) => return Err(decode("syncinfo: [0] not primitive")),
                                 };
-                                SyncInfo::NewCookie(cookie)
+                                Ok(SyncInfo::NewCookie(cookie))
                             }
                             1..=3 => {
                                 let mut syncinfo_val = match payload {
                                     PL::C(payload) => payload,
-                                    PL::P(_) => panic!("syncinfo: [1,2,3] not a sequence"),
+                                    PL::P(_) => {
+                                        return Err(decode("syncinfo: [1,2,3] not a sequence"));
+                                    }
                                 }
                                 .into_iter();
                                 let mut sync_cookie = None;
@@ -265,8 +318,9 @@ pub fn parse_syncinfo(entry: ResultEntry) -> SyncInfo {
                                             {
                                                 flag = comp
                                                     .expect_primitive()
-                                                    .expect("octet string")[0]
-                                                    != 0;
+                                                    .ok_or_else(|| decode("syncinfo: flag"))?
+                                                    .first()
+                                                    .is_some_and(|b| *b != 0);
                                             }
                                             StructureTag { id, class, .. }
                                                 if class == TagClass::Universal
@@ -275,42 +329,69 @@ pub fn parse_syncinfo(entry: ResultEntry) -> SyncInfo {
                                             {
                                                 uuids = comp
                                                     .expect_constructed()
-                                                    .expect("uuid set")
+                                                    .ok_or_else(|| decode("syncinfo: uuid set"))?
                                                     .into_iter()
                                                     .map(|u| {
-                                                        u.expect_primitive().expect("octet string")
+                                                        u.expect_primitive().ok_or_else(|| {
+                                                            decode("syncinfo: uuid octet string")
+                                                        })
                                                     })
-                                                    .collect();
+                                                    .collect::<Result<_>>()?;
                                             }
-                                            _ => panic!(),
+                                            _ => {
+                                                return Err(decode(
+                                                    "syncinfo: unexpected component",
+                                                ));
+                                            }
                                         },
                                     }
                                     pass += 1;
                                 }
                                 match id {
-                                    1 => SyncInfo::RefreshDelete {
+                                    1 => Ok(SyncInfo::RefreshDelete {
                                         cookie: sync_cookie,
                                         refresh_done: flag,
-                                    },
-                                    2 => SyncInfo::RefreshPresent {
+                                    }),
+                                    2 => Ok(SyncInfo::RefreshPresent {
                                         cookie: sync_cookie,
                                         refresh_done: flag,
-                                    },
-                                    3 => SyncInfo::SyncIdSet {
+                                    }),
+                                    3 => Ok(SyncInfo::SyncIdSet {
                                         cookie: sync_cookie,
                                         refresh_deletes: flag,
                                         sync_uuids: uuids,
-                                    },
-                                    _ => panic!("syncinfo: got id > 3"),
+                                    }),
+                                    _ => Err(decode("syncinfo: got id > 3")),
                                 }
                             }
-                            _ => panic!("syncinfo: got id > 3"),
+                            _ => Err(decode("syncinfo: got id > 3")),
                         }
                     }
-                    _ => panic!("syncinfo: got id > 3"),
+                    _ => Err(decode("syncinfo: got id > 3")),
                 };
             }
-            _ => panic!("syncinfo: unrecognized tag"),
+            _ => return Err(decode("syncinfo: unrecognized tag")),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn sync_state_garbage_is_error() {
+        assert!(matches!(
+            SyncState::try_parse(&[0xff, 0xff]),
+            Err(LdapError::DecodingError(_))
+        ));
+    }
+
+    #[test]
+    fn sync_done_garbage_is_error() {
+        assert!(matches!(
+            SyncDone::try_parse(&[0xff, 0xff]),
+            Err(LdapError::DecodingError(_))
+        ));
     }
 }

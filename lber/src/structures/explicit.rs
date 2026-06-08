@@ -1,7 +1,5 @@
-use crate::structure;
-
 use super::{ASNTag, Tag};
-use crate::common::TagClass;
+use crate::{common::TagClass, structure};
 
 /// Explicitly tagged value.
 // Explicit tags don't implement Default because that just wouldn't make sense.

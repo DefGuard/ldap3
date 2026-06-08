@@ -4,9 +4,11 @@
 // If you comment out the first element of the adapters vector,
 // the program will crash when it hits a referral.
 
-use ldap3::adapters::{Adapter, EntriesOnly, PagedResults};
-use ldap3::result::Result;
-use ldap3::{LdapConn, Scope, SearchEntry};
+use ldap3::{
+    LdapConn, Scope, SearchEntry,
+    adapters::{Adapter, EntriesOnly, PagedResults},
+    result::Result,
+};
 
 fn main() -> Result<()> {
     let mut ldap = LdapConn::new("ldap://localhost:2389")?;
@@ -23,8 +25,8 @@ fn main() -> Result<()> {
     )?;
     while let Some(entry) = search.next()? {
         let entry = SearchEntry::construct(entry);
-        println!("{:?}", entry);
+        println!("{entry:?}");
     }
     let _res = search.result().success()?;
-    Ok(ldap.unbind()?)
+    ldap.unbind()
 }

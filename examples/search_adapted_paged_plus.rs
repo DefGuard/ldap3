@@ -3,9 +3,11 @@
 // If you comment out the first element of the adapters vector,
 // the program will crash when it hits a referral.
 
-use ldap3::adapters::{Adapter, EntriesOnly, PagedResults};
-use ldap3::result::Result;
-use ldap3::{LdapConnAsync, Scope, SearchEntry};
+use ldap3::{
+    LdapConnAsync, Scope, SearchEntry,
+    adapters::{Adapter, EntriesOnly, PagedResults},
+    result::Result,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -26,8 +28,8 @@ async fn main() -> Result<()> {
         .await?;
     while let Some(entry) = search.next().await? {
         let entry = SearchEntry::construct(entry);
-        println!("{:?}", entry);
+        println!("{entry:?}");
     }
     let _res = search.finish().await.success()?;
-    Ok(ldap.unbind().await?)
+    ldap.unbind().await
 }

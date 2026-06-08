@@ -1,21 +1,23 @@
-use std::collections::HashMap;
-use std::fmt::Debug;
-use std::sync::Arc;
-use std::time::Duration;
+use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Duration};
 
-use crate::adapters::Adapter;
-use crate::controls::Control;
-use crate::ldap::Ldap;
-use crate::parse_filter;
-use crate::protocol::LdapOp;
-use crate::result::{LdapError, LdapResult, Result};
+use lber::{
+    common::TagClass,
+    structure::StructureTag,
+    structures::{Boolean, Enumerated, Integer, OctetString, Sequence, Tag},
+};
+use tokio::{
+    sync::{Mutex, mpsc},
+    time,
+};
 
-use tokio::sync::{Mutex, mpsc};
-use tokio::time;
-
-use lber::common::TagClass;
-use lber::structure::StructureTag;
-use lber::structures::{Boolean, Enumerated, Integer, OctetString, Sequence, Tag};
+use crate::{
+    adapters::Adapter,
+    controls::Control,
+    ldap::Ldap,
+    parse_filter,
+    protocol::LdapOp,
+    result::{LdapError, LdapResult, Result},
+};
 
 /// Possible values for search scope.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -148,49 +150,66 @@ pub struct SearchEntry {
 impl SearchEntry {
     /// Parse raw BER data and convert it into attribute map(s).
     ///
-    /// __Note__: this function will panic on parsing error.
+    /// __Note__: this function will panic on parsing error. Use
+    /// [`try_construct()`](#method.try_construct) for a non-panicking variant
+    /// that returns a [`Result`](type.Result.html) instead.
     pub fn construct(re: ResultEntry) -> SearchEntry {
+        SearchEntry::try_construct(re).expect("entry")
+    }
+
+    /// Parse raw BER data and convert it into attribute map(s), returning a
+    /// decoding error.
+    pub fn try_construct(re: ResultEntry) -> Result<SearchEntry> {
+        fn decode<S: Into<String>>(msg: S) -> LdapError {
+            LdapError::DecodingError(msg.into())
+        }
+
         let mut tags =
             re.0.match_id(4)
                 .and_then(|t| t.expect_constructed())
-                .expect("entry")
+                .ok_or_else(|| decode("entry"))?
                 .into_iter();
         let dn = String::from_utf8(
             tags.next()
-                .expect("element")
+                .ok_or_else(|| decode("missing DN element"))?
                 .expect_primitive()
-                .expect("octet string"),
+                .ok_or_else(|| decode("DN octet string"))?,
         )
-        .expect("dn");
+        .map_err(|e| decode(format!("DN is not valid UTF-8: {e}")))?;
         let mut attr_vals = HashMap::new();
         let mut bin_attr_vals = HashMap::new();
         let attrs = tags
             .next()
-            .expect("element")
+            .ok_or_else(|| decode("missing attributes element"))?
             .expect_constructed()
-            .expect("attrs")
+            .ok_or_else(|| decode("attrs"))?
             .into_iter();
         for a_v in attrs {
             let mut part_attr = a_v
                 .expect_constructed()
-                .expect("partial attribute")
+                .ok_or_else(|| decode("partial attribute"))?
                 .into_iter();
             let a_type = String::from_utf8(
                 part_attr
                     .next()
-                    .expect("element")
+                    .ok_or_else(|| decode("missing attribute type element"))?
                     .expect_primitive()
-                    .expect("octet string"),
+                    .ok_or_else(|| decode("attribute type octet string"))?,
             )
-            .expect("attribute type");
+            .map_err(|e| decode(format!("attribute type is not valid UTF-8: {e}")))?;
             let mut any_binary = false;
             let values = part_attr
                 .next()
-                .expect("element")
+                .ok_or_else(|| decode("missing attribute values element"))?
                 .expect_constructed()
-                .expect("values")
+                .ok_or_else(|| decode("values"))?
                 .into_iter()
-                .map(|t| t.expect_primitive().expect("octet string"))
+                .map(|t| {
+                    t.expect_primitive()
+                        .ok_or_else(|| decode("value octet string"))
+                })
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
                 .filter_map(|s| {
                     if let Ok(s) = std::str::from_utf8(s.as_ref()) {
                         return Some(s.to_owned());
@@ -204,21 +223,24 @@ impl SearchEntry {
                 })
                 .collect::<Vec<String>>();
             if any_binary {
-                bin_attr_vals.get_mut(&a_type).expect("bin vector").extend(
-                    values
-                        .into_iter()
-                        .map(String::into_bytes)
-                        .collect::<Vec<Vec<u8>>>(),
-                );
+                bin_attr_vals
+                    .get_mut(&a_type)
+                    .ok_or_else(|| decode("bin vector"))?
+                    .extend(
+                        values
+                            .into_iter()
+                            .map(String::into_bytes)
+                            .collect::<Vec<Vec<u8>>>(),
+                    );
             } else {
                 attr_vals.insert(a_type, values);
             }
         }
-        SearchEntry {
+        Ok(SearchEntry {
             dn,
             attrs: attr_vals,
             bin_attrs: bin_attr_vals,
-        }
+        })
     }
 }
 
@@ -707,8 +729,7 @@ where
             let last_id = self.ldap.last_id;
             if let Err(e) = self.ldap.id_scrub_tx.send(last_id) {
                 warn!(
-                    "error sending scrub message from SearchStream::finish() for ID {}: {}",
-                    last_id, e
+                    "error sending scrub message from SearchStream::finish() for ID {last_id}: {e}"
                 );
             }
         }
@@ -840,12 +861,92 @@ where
 }
 
 /// Parse the referrals from the supplied BER-encoded sequence.
+///
+/// __Note__: this function will panic on parsing error. Use
+/// [`try_parse_refs()`](fn.try_parse_refs.html) for a non-panicking variant.
 pub fn parse_refs(t: StructureTag) -> Vec<String> {
+    try_parse_refs(t).expect("referrals")
+}
+
+/// Parse the referrals from the supplied BER-encoded sequence, returning a
+/// decoding error on malformed input.
+pub fn try_parse_refs(t: StructureTag) -> Result<Vec<String>> {
+    fn decode<S: Into<String>>(msg: S) -> LdapError {
+        LdapError::DecodingError(msg.into())
+    }
+
     t.expect_constructed()
-        .expect("referrals")
+        .ok_or_else(|| decode("referrals"))?
         .into_iter()
-        .map(|t| t.expect_primitive().expect("octet string"))
-        .map(String::from_utf8)
-        .map(|s| s.expect("uri"))
+        .map(|t| {
+            let bytes = t
+                .expect_primitive()
+                .ok_or_else(|| decode("referral octet string"))?;
+            String::from_utf8(bytes)
+                .map_err(|e| decode(format!("referral URI is not valid UTF-8: {e}")))
+        })
         .collect()
+}
+
+#[cfg(test)]
+mod test {
+    use lber::structure::PL;
+
+    use super::*;
+
+    fn prim(id: u64, val: &[u8]) -> StructureTag {
+        StructureTag {
+            class: TagClass::Universal,
+            id,
+            payload: PL::P(val.to_vec()),
+        }
+    }
+
+    fn cons(class: TagClass, id: u64, inner: Vec<StructureTag>) -> StructureTag {
+        StructureTag {
+            class,
+            id,
+            payload: PL::C(inner),
+        }
+    }
+
+    // A search entry whose top-level tag doesn't match id 4 used to panic in
+    // `expect("entry")`; it must now return a decoding error.
+    #[test]
+    fn try_construct_wrong_tag_is_error() {
+        let re = ResultEntry::new(prim(5, b""));
+        match SearchEntry::try_construct(re) {
+            Err(LdapError::DecodingError(_)) => {}
+            other => panic!("expected DecodingError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn try_construct_wellformed() {
+        let entry = cons(
+            TagClass::Application,
+            4,
+            vec![
+                prim(4, b"cn=test"),
+                cons(
+                    TagClass::Universal,
+                    16,
+                    vec![cons(
+                        TagClass::Universal,
+                        16,
+                        vec![
+                            prim(4, b"cn"),
+                            cons(TagClass::Universal, 17, vec![prim(4, b"test")]),
+                        ],
+                    )],
+                ),
+            ],
+        );
+        let se = SearchEntry::try_construct(ResultEntry::new(entry)).expect("wellformed entry");
+        assert_eq!(se.dn, "cn=test");
+        assert_eq!(
+            se.attrs.get("cn").map(|v| v.as_slice()),
+            Some(&["test".to_string()][..])
+        );
+    }
 }

@@ -3,8 +3,7 @@
 
 use std::net::TcpStream;
 
-use ldap3::result::Result;
-use ldap3::{LdapConn, LdapConnSettings, StdStream};
+use ldap3::{LdapConn, LdapConnSettings, StdStream, result::Result};
 
 fn main() -> Result<()> {
     let stream = TcpStream::connect("localhost:2389")?;
@@ -13,5 +12,5 @@ fn main() -> Result<()> {
     let _res = ldap
         .simple_bind("cn=Manager,dc=example,dc=org", "secret")?
         .success()?;
-    Ok(ldap.unbind()?)
+    ldap.unbind()
 }

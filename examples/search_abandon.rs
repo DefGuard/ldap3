@@ -8,8 +8,7 @@
 // The synchronous API lacks the method to retrieve the underlying
 // Ldap handle, but last_id() can be called directly on the stream.
 
-use ldap3::result::Result;
-use ldap3::{LdapConnAsync, Scope};
+use ldap3::{LdapConnAsync, Scope, result::Result};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -23,11 +22,10 @@ async fn main() -> Result<()> {
             vec!["l"],
         )
         .await?;
-    while let Some(_r) = stream.next().await? {
-        break;
-    }
+    // Fetch a single entry, then abandon the rest of the search.
+    let _ = stream.next().await?;
     let _res = stream.finish().await;
     let msgid = stream.ldap_handle().last_id();
     ldap.abandon(msgid).await?;
-    Ok(ldap.unbind().await?)
+    ldap.unbind().await
 }

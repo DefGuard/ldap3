@@ -7,9 +7,11 @@
 //
 // Notice: only works on Unix (uses Unix domain sockets)
 
-use ldap3::LdapConnAsync;
-use ldap3::exop::{WhoAmI, WhoAmIResp};
-use ldap3::result::Result;
+use ldap3::{
+    LdapConnAsync,
+    exop::{WhoAmI, WhoAmIResp},
+    result::Result,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -19,5 +21,5 @@ async fn main() -> Result<()> {
     let (exop, _res) = ldap.extended(WhoAmI).await?.success()?;
     let whoami: WhoAmIResp = exop.parse();
     println!("{}", whoami.authzid);
-    Ok(ldap.unbind().await?)
+    ldap.unbind().await
 }

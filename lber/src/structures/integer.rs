@@ -1,9 +1,7 @@
-use super::ASNTag;
-use crate::common::TagClass;
-use crate::structure;
-use crate::universal;
-
 use std::default;
+
+use super::ASNTag;
+use crate::{common::TagClass, structure, universal};
 
 /// Integer value.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -88,9 +86,7 @@ impl default::Default for Enumerated {
 #[cfg(test)]
 mod test {
     use super::i_e_into_structure;
-
-    use crate::common::TagClass;
-    use crate::structure;
+    use crate::{common::TagClass, structure};
 
     #[test]
     fn test_not_unnecessary_octets() {

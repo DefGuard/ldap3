@@ -1,28 +1,35 @@
-use std::collections::HashSet;
-use std::hash::Hash;
 #[cfg(feature = "gssapi")]
 use std::sync::RwLock;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-
-use crate::RequestId;
-use crate::adapters::{EntriesOnly, IntoAdapterVec};
-use crate::controls_impl::IntoRawControlVec;
-use crate::exop::Exop;
-use crate::exop_impl::construct_exop;
-use crate::protocol::{LdapOp, MaybeControls, MiscSender, ResultSender};
-use crate::result::{
-    CompareResult, ExopResult, LdapError, LdapResult, LdapResultExt, Result, SearchResult,
+use std::{
+    collections::HashSet,
+    hash::Hash,
+    sync::{Arc, Mutex},
+    time::Duration,
 };
-use crate::search::{Scope, SearchOptions, SearchStream};
-
-use lber::common::TagClass;
-use lber::structures::{Boolean, Enumerated, Integer, Null, OctetString, Sequence, Set, Tag};
 
 #[cfg(feature = "gssapi")]
 use cross_krb5::{ClientCtx, Cred, InitiateFlags, K5Ctx, Step};
-use tokio::sync::{mpsc, oneshot};
-use tokio::time;
+use lber::{
+    common::TagClass,
+    structures::{Boolean, Enumerated, Integer, Null, OctetString, Sequence, Set, Tag},
+};
+use tokio::{
+    sync::{mpsc, oneshot},
+    time,
+};
+
+use crate::{
+    RequestId,
+    adapters::{EntriesOnly, IntoAdapterVec},
+    controls_impl::IntoRawControlVec,
+    exop::Exop,
+    exop_impl::construct_exop,
+    protocol::{LdapOp, MaybeControls, MiscSender, ResultSender},
+    result::{
+        CompareResult, ExopResult, LdapError, LdapResult, LdapResultExt, Result, SearchResult,
+    },
+    search::{Scope, SearchOptions, SearchStream},
+};
 
 /// SASL bind exchange wrapper.
 #[allow(dead_code)]
@@ -157,7 +164,7 @@ impl Ldap {
         let last_ldap_id = msgmap.0;
         let mut next_ldap_id = last_ldap_id;
         loop {
-            if next_ldap_id == std::i32::MAX {
+            if next_ldap_id == i32::MAX {
                 next_ldap_id = 1;
             } else {
                 next_ldap_id += 1;
@@ -392,6 +399,15 @@ impl Ldap {
         let mut buf = client_ctx
             .unwrap(&token)
             .map_err(|e| LdapError::GssapiOperationError(format!("{:#}", e)))?;
+        // The SASL security layer message is a fixed 4 octets: a one-byte layer
+        // bitmask followed by a three-byte maximum buffer size. A shorter message
+        // from a broken or hostile server would otherwise panic on indexing below.
+        if buf.len() != 4 {
+            return Err(LdapError::GssapiOperationError(format!(
+                "expected 4-octet SASL security layer message, got {}",
+                buf.len()
+            )));
+        }
         let needed_layer = if self.has_tls {
             GSSAUTH_P_NONE
         } else {
@@ -415,8 +431,10 @@ impl Ldap {
         if res.rc == 0 {
             if needed_layer == GSSAUTH_P_PRIVACY {
                 buf[0] = 0;
-                let send_max_size =
-                    u32::from_be_bytes((&buf[..]).try_into().expect("send max size"));
+                let size_bytes: [u8; 4] = (&buf[..]).try_into().map_err(|_| {
+                    LdapError::GssapiOperationError(String::from("malformed send max size"))
+                })?;
+                let send_max_size = u32::from_be_bytes(size_bytes);
                 if send_max_size == 0 {
                     warn!("got zero send_max_size, will be treated as unlimited");
                 }
@@ -477,7 +495,7 @@ impl Ldap {
 
         let mut ntlm = Ntlm::new();
         let identity = AuthIdentity {
-            username: Username::parse(username).unwrap(),
+            username: Username::parse(username)?,
             password: password.to_string().into(),
         };
         let mut acq_creds = ntlm
@@ -813,7 +831,7 @@ impl Ldap {
         let req = Tag::Sequence(Sequence {
             id: 23,
             class: TagClass::Application,
-            inner: construct_exop(exop.into()),
+            inner: construct_exop(exop.into())?,
         });
         self.op_call(LdapOp::Single, req)
             .await

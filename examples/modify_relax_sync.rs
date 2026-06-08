@@ -8,9 +8,11 @@
 
 use std::collections::HashSet;
 
-use ldap3::controls::{MakeCritical, RelaxRules};
-use ldap3::result::Result;
-use ldap3::{LdapConn, Mod, Scope};
+use ldap3::{
+    LdapConn, Mod, Scope,
+    controls::{MakeCritical, RelaxRules},
+    result::Result,
+};
 
 fn main() -> Result<()> {
     let mut ldap = LdapConn::new("ldap://localhost:2389")?;
@@ -43,6 +45,6 @@ fn main() -> Result<()> {
         .with_controls(RelaxRules.critical())
         .modify("uid=inejge,ou=People,dc=example,dc=org", mod_vec)?
         .success()?;
-    println!("{:?}", res);
-    Ok(ldap.unbind()?)
+    println!("{res:?}");
+    ldap.unbind()
 }

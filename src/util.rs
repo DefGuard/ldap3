@@ -1,13 +1,17 @@
-use std::borrow::Cow;
-use std::collections::HashSet;
-use std::hash::{Hash, Hasher};
-
-use crate::filter::Unescaper;
-use crate::result::{LdapError, Result};
-use crate::search::Scope;
+use std::{
+    borrow::Cow,
+    collections::HashSet,
+    hash::{Hash, Hasher},
+};
 
 use percent_encoding::percent_decode_str;
 use url::Url;
+
+use crate::{
+    filter::Unescaper,
+    result::{LdapError, Result},
+    search::Scope,
+};
 
 /// Escape a filter literal.
 ///
@@ -344,10 +348,10 @@ pub fn ldap_unescape<'a, S: Into<Cow<'a, str>>>(val: S) -> Result<Cow<'a, str>> 
             _ => (),
         }
     }
-    if output.is_some() {
+    if let Some(output) = output {
         if let Unescaper::Value(_) = esc {
             Ok(Cow::Owned(
-                String::from_utf8(output.unwrap()).map_err(|_| LdapError::DecodingUTF8)?,
+                String::from_utf8(output).map_err(|_| LdapError::DecodingUTF8)?,
             ))
         } else {
             Err(LdapError::DecodingUTF8)

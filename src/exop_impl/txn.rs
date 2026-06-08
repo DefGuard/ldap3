@@ -1,3 +1,5 @@
+use std::str;
+
 use bytes::BytesMut;
 use lber::{
     common::TagClass,
@@ -7,11 +9,13 @@ use lber::{
     universal::Types,
     write,
 };
-use std::str;
-
-use crate::{controls::Control, controls_impl::parse_controls};
 
 use super::{Exop, ExopParser};
+use crate::{
+    controls::Control,
+    controls_impl::parse_controls,
+    result::{LdapError, Result},
+};
 
 pub const TXN_START_OID: &str = "1.3.6.1.1.21.1";
 pub const TXN_END_OID: &str = "1.3.6.1.1.21.3";
@@ -43,11 +47,21 @@ impl From<StartTxn> for Exop {
     }
 }
 
+impl StartTxnResp {
+    /// Parse a Start Transaction response value, returning a decoding error on
+    /// a non-UTF-8 value.
+    pub fn try_parse(val: &[u8]) -> Result<StartTxnResp> {
+        Ok(StartTxnResp {
+            txn_id: str::from_utf8(val)
+                .map_err(|_| LdapError::DecodingUTF8)?
+                .to_owned(),
+        })
+    }
+}
+
 impl ExopParser for StartTxnResp {
     fn parse(val: &[u8]) -> StartTxnResp {
-        StartTxnResp {
-            txn_id: str::from_utf8(val).expect("txn_id").to_owned(),
-        }
+        StartTxnResp::try_parse(val).expect("start txn response")
     }
 }
 
@@ -112,19 +126,24 @@ impl<'a> From<EndTxn<'a>> for Exop {
     }
 }
 
-impl ExopParser for EndTxnResp {
-    fn parse(val: &[u8]) -> EndTxnResp {
+impl EndTxnResp {
+    /// Parse an End Transaction response value, returning a decoding error.
+    pub fn try_parse(val: &[u8]) -> Result<EndTxnResp> {
+        fn decode<S: Into<String>>(msg: S) -> LdapError {
+            LdapError::DecodingError(msg.into())
+        }
+
         let mut tags = match parse_tag(val) {
             Ok((_, tag)) => tag,
-            _ => panic!("endtxnresp: failed to parse tag"),
+            _ => return Err(decode("endtxnresp: failed to parse tag")),
         }
         .expect_constructed()
-        .expect("endtxnresp: elements")
+        .ok_or_else(|| decode("endtxnresp: elements"))?
         .into_iter();
 
         let mut msg_id = None;
         let mut upds_ctrls = None;
-        while let Some(tag) = tags.next() {
+        for tag in tags.by_ref() {
             match tag {
                 StructureTag {
                     id,
@@ -133,7 +152,7 @@ impl ExopParser for EndTxnResp {
                 } if id == Types::Integer as u64 && class == TagClass::Universal => {
                     msg_id = Some(match parse_uint(v.as_slice()) {
                         Ok((_, size)) => size as i32,
-                        _ => panic!("failed to parse msg_id"),
+                        _ => return Err(decode("failed to parse msg_id")),
                     });
                 }
                 StructureTag {
@@ -143,18 +162,21 @@ impl ExopParser for EndTxnResp {
                 } if id == Types::Sequence as u64 && class == TagClass::Universal => {
                     let mut ctrls = Vec::with_capacity(tags.len() / 2);
                     while !tags.is_empty() {
-                        let controls = parse_controls(tags.pop().expect("element"));
+                        let controls = parse_controls(
+                            tags.pop()
+                                .ok_or_else(|| decode("endtxnresp: missing controls element"))?,
+                        )?;
                         let msg_id = match parse_uint(
                             tags.pop()
-                                .expect("element")
+                                .ok_or_else(|| decode("endtxnresp: missing message id element"))?
                                 .match_class(TagClass::Universal)
                                 .and_then(|t| t.match_id(Types::Integer as u64))
                                 .and_then(|t| t.expect_primitive())
-                                .expect("message id")
+                                .ok_or_else(|| decode("endtxnresp: message id"))?
                                 .as_slice(),
                         ) {
                             Ok((_, id)) => id as i32,
-                            _ => panic!("failed to parse msg_id"),
+                            _ => return Err(decode("failed to parse msg_id")),
                         };
                         ctrls.push((msg_id, controls));
                     }
@@ -162,14 +184,41 @@ impl ExopParser for EndTxnResp {
 
                     break;
                 }
-                _ => panic!("failed to parse endtxnresp"),
+                _ => return Err(decode("failed to parse endtxnresp")),
             }
         }
 
         if tags.next().is_some() {
-            panic!("failed to parse endtxnresp");
+            return Err(decode("failed to parse endtxnresp"));
         }
 
-        EndTxnResp { msg_id, upds_ctrls }
+        Ok(EndTxnResp { msg_id, upds_ctrls })
+    }
+}
+
+impl ExopParser for EndTxnResp {
+    fn parse(val: &[u8]) -> EndTxnResp {
+        EndTxnResp::try_parse(val).expect("end txn response")
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn start_txn_resp_non_utf8_is_error() {
+        assert!(matches!(
+            StartTxnResp::try_parse(&[0xff, 0xfe]),
+            Err(LdapError::DecodingUTF8)
+        ));
+    }
+
+    #[test]
+    fn end_txn_resp_garbage_is_error() {
+        assert!(matches!(
+            EndTxnResp::try_parse(&[0xff, 0xff]),
+            Err(LdapError::DecodingError(_))
+        ));
     }
 }

@@ -1,8 +1,7 @@
 // Demonstrates the ModifyDN operation. The program will query
 // the database to find out which modification make sense.
 
-use ldap3::result::Result;
-use ldap3::{LdapConn, Scope, SearchEntry};
+use ldap3::{LdapConn, Scope, SearchEntry, result::Result};
 
 const TEST_RDN: &str = "uid=test";
 const NEXT_RDN: &str = "uid=next";
@@ -26,8 +25,8 @@ fn main() -> Result<()> {
         "next" => (NEXT_RDN, TEST_RDN),
         _ => panic!("unexpected uid"),
     };
-    let dn = format!("{},ou=People,dc=example,dc=org", cur_rdn);
+    let dn = format!("{cur_rdn},ou=People,dc=example,dc=org");
     let res = ldap.modifydn(&dn, new_rdn, true, None)?.success()?;
-    println!("{:?}", res);
-    Ok(ldap.unbind()?)
+    println!("{res:?}");
+    ldap.unbind()
 }

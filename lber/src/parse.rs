@@ -1,17 +1,19 @@
 use std::convert::TryFrom;
 
-use crate::common::TagClass;
-use crate::common::TagStructure;
-use crate::structure::{PL, StructureTag};
+use nom::{
+    self, IResult, InputLength, Needed,
+    bits::streaming as bits,
+    bytes::streaming::take,
+    combinator::map_opt,
+    error::{Error, ErrorKind, ParseError},
+    number::streaming as number,
+    sequence::tuple,
+};
 
-use nom;
-use nom::bits::streaming as bits;
-use nom::bytes::streaming::take;
-use nom::combinator::map_opt;
-use nom::error::{Error, ErrorKind, ParseError};
-use nom::number::streaming as number;
-use nom::sequence::tuple;
-use nom::{IResult, InputLength, Needed};
+use crate::{
+    common::{TagClass, TagStructure},
+    structure::{PL, StructureTag},
+};
 
 fn class_bits(i: (&[u8], usize)) -> nom::IResult<(&[u8], usize), TagClass> {
     map_opt(bits::take(2usize), TagClass::from_u8)(i)
@@ -113,8 +115,10 @@ impl Default for Parser {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::common::TagClass;
-    use crate::structure::{PL, StructureTag};
+    use crate::{
+        common::TagClass,
+        structure::{PL, StructureTag},
+    };
 
     #[test]
     fn test_primitive() {

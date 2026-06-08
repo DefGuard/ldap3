@@ -1,7 +1,6 @@
 // Demonstrates the Compare operation.
 
-use ldap3::LdapConn;
-use ldap3::result::Result;
+use ldap3::{LdapConn, result::Result};
 
 fn main() -> Result<()> {
     let mut ldap = LdapConn::new("ldap://localhost:2389")?;
@@ -15,5 +14,5 @@ fn main() -> Result<()> {
         )?
         .equal()?;
     println!("{}equal", if eq { "" } else { "not " });
-    Ok(ldap.unbind()?)
+    ldap.unbind()
 }

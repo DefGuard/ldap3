@@ -18,16 +18,16 @@
 //! Adapters must be written with async calls, but work equally well for both async and sync versions of the API
 //! because the sync API is just a blocking façade for the async one.
 
-use std::fmt::Debug;
-use std::marker::PhantomData;
-
-use crate::controls::{self, Control, ControlType};
-use crate::ldap::Ldap;
-use crate::result::{LdapError, LdapResult, Result};
-use crate::search::parse_refs;
-use crate::search::{ResultEntry, Scope, SearchStream};
+use std::{fmt::Debug, marker::PhantomData};
 
 use async_trait::async_trait;
+
+use crate::{
+    controls::{self, Control, ControlType},
+    ldap::Ldap,
+    result::{LdapError, LdapResult, Result},
+    search::{ResultEntry, Scope, SearchStream, parse_refs},
+};
 
 /// Adapter interface to a Search.
 ///
@@ -400,15 +400,29 @@ where
                     for (cno, ctrl) in ctrls.iter().enumerate() {
                         if let Control(Some(ControlType::PagedResults), ref raw) = *ctrl {
                             pr_index = Some(cno);
-                            let pr: controls::PagedResults = raw.parse();
+                            let pr = controls::PagedResults::try_parse(
+                                raw.val.as_deref().ok_or_else(|| {
+                                    LdapError::DecodingError(String::from(
+                                        "paged results control without value",
+                                    ))
+                                })?,
+                            )?;
                             if pr.cookie.is_empty() {
                                 break;
                             }
-                            let ldap_ref = self.ldap.as_ref().expect("ldap_ref");
+                            let ldap_ref = self.ldap.as_ref().ok_or_else(|| {
+                                LdapError::AdapterInit(String::from(
+                                    "paged results adapter used before start",
+                                ))
+                            })?;
                             let mut ldap = ldap_ref.clone();
                             ldap.timeout = ldap_ref.timeout;
                             ldap.search_opts = ldap_ref.search_opts.clone();
-                            let mut controls = ldap_ref.controls.clone().expect("saved ctrls");
+                            let mut controls = ldap_ref.controls.clone().ok_or_else(|| {
+                                LdapError::AdapterInit(String::from(
+                                    "paged results adapter missing saved controls",
+                                ))
+                            })?;
                             controls.push(
                                 controls::PagedResults {
                                     size: self.page_size,
@@ -417,13 +431,13 @@ where
                                 .into(),
                             );
                             ldap.controls = Some(controls);
+                            let attrs = self.attrs.as_ref().ok_or_else(|| {
+                                LdapError::AdapterInit(String::from(
+                                    "paged results adapter missing saved attributes",
+                                ))
+                            })?;
                             let new_stream = match ldap
-                                .streaming_search(
-                                    &self.base,
-                                    self.scope,
-                                    &self.filter,
-                                    self.attrs.as_ref().unwrap(),
-                                )
+                                .streaming_search(&self.base, self.scope, &self.filter, attrs)
                                 .await
                             {
                                 Ok(strm) => strm,

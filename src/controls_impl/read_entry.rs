@@ -1,12 +1,17 @@
 use std::collections::HashMap;
 
 use bytes::BytesMut;
+use lber::{
+    parse::parse_tag,
+    structures::{ASNTag, OctetString, Sequence, Tag},
+    write,
+};
 
 use super::{ControlParser, MakeCritical, RawControl};
-use crate::search::{ResultEntry, SearchEntry};
-use lber::parse::parse_tag;
-use lber::structures::{ASNTag, OctetString, Sequence, Tag};
-use lber::write;
+use crate::{
+    result::{LdapError, Result},
+    search::{ResultEntry, SearchEntry},
+};
 
 pub const PRE_READ_OID: &str = "1.3.6.1.1.13.1";
 pub const POST_READ_OID: &str = "1.3.6.1.1.13.2";
@@ -106,16 +111,28 @@ fn from_read_entry<S: AsRef<str>>(re: ReadEntry<S>) -> RawControl {
     }
 }
 
-impl ControlParser for ReadEntryResp {
-    fn parse(val: &[u8]) -> ReadEntryResp {
+impl ReadEntryResp {
+    /// Parse a Pre-Read or Post-Read control value, returning a decoding error
+    /// on a malformed or unexpected value.
+    pub fn try_parse(val: &[u8]) -> Result<ReadEntryResp> {
         let tag = match parse_tag(val) {
             Ok((_, tag)) => tag,
-            _ => panic!("failed to parse pre-read attribute values"),
+            _ => {
+                return Err(LdapError::DecodingError(String::from(
+                    "failed to parse pre-read attribute values",
+                )));
+            }
         };
-        let se = SearchEntry::construct(ResultEntry::new(tag));
-        ReadEntryResp {
+        let se = SearchEntry::try_construct(ResultEntry::new(tag))?;
+        Ok(ReadEntryResp {
             attrs: se.attrs,
             bin_attrs: se.bin_attrs,
-        }
+        })
+    }
+}
+
+impl ControlParser for ReadEntryResp {
+    fn parse(val: &[u8]) -> ReadEntryResp {
+        ReadEntryResp::try_parse(val).expect("read entry response")
     }
 }

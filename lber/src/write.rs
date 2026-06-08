@@ -1,9 +1,12 @@
 //! BER encoding support.
-use crate::common::{TagClass, TagStructure};
-use crate::structure::{PL, StructureTag};
+use std::io::{self, Write};
+
 use bytes::BytesMut;
 
-use std::io::{self, Write};
+use crate::{
+    common::{TagClass, TagStructure},
+    structure::{PL, StructureTag},
+};
 
 /// BER-encode a tag structure into the provided buffer.
 pub fn encode_into(buf: &mut BytesMut, tag: StructureTag) -> io::Result<()> {
@@ -121,8 +124,7 @@ mod tests {
 
     use bytes::BytesMut;
 
-    use crate::common::TagClass::*;
-    use crate::structures::*;
+    use crate::{common::TagClass::*, structures::*};
 
     #[test]
     fn encode_simple_tag() {
