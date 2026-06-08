@@ -611,7 +611,7 @@ mod test {
         let tag = Tag::StructureTag(StructureTag {
             class: TagClass::Application,
             id: 5,
-            payload: PL::C(vec![]),
+            payload: PL::C(Vec::new()),
         });
         match LdapResultExt::try_from_tag(tag) {
             Err(LdapError::DecodingError(_)) => {}
