@@ -1,10 +1,7 @@
 // Demonstrates streaming Search with and without an adapter.
 // The result set is known to contain a referral object.
 
-use ldap3::adapters::EntriesOnly;
-use ldap3::parse_refs;
-use ldap3::result::Result;
-use ldap3::{LdapConnAsync, Scope, SearchEntry};
+use ldap3::{LdapConnAsync, Scope, SearchEntry, adapters::EntriesOnly, parse_refs, result::Result};
 
 #[tokio::main]
 async fn main() -> Result<()> {

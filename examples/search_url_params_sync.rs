@@ -1,8 +1,7 @@
 // Demonstrates parsing the LDAP URL and using the results
 // for performing a Search.
 
-use ldap3::result::Result;
-use ldap3::{LdapConn, SearchEntry, get_url_params};
+use ldap3::{LdapConn, SearchEntry, get_url_params, result::Result};
 use url::Url;
 
 fn main() -> Result<()> {

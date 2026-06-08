@@ -1,12 +1,13 @@
+use bytes::BytesMut;
+use lber::{
+    common::TagClass,
+    parse::parse_tag,
+    structures::{ASNTag, OctetString, Sequence, Tag},
+    write,
+};
+
 use super::{Exop, ExopParser};
 use crate::result::{LdapError, Result};
-
-use bytes::BytesMut;
-
-use lber::common::TagClass;
-use lber::parse::parse_tag;
-use lber::structures::{ASNTag, OctetString, Sequence, Tag};
-use lber::write;
 
 pub const PASSMOD_OID: &str = "1.3.6.1.4.1.4203.1.11.1";
 

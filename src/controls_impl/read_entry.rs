@@ -1,13 +1,17 @@
 use std::collections::HashMap;
 
 use bytes::BytesMut;
+use lber::{
+    parse::parse_tag,
+    structures::{ASNTag, OctetString, Sequence, Tag},
+    write,
+};
 
 use super::{ControlParser, MakeCritical, RawControl};
-use crate::result::{LdapError, Result};
-use crate::search::{ResultEntry, SearchEntry};
-use lber::parse::parse_tag;
-use lber::structures::{ASNTag, OctetString, Sequence, Tag};
-use lber::write;
+use crate::{
+    result::{LdapError, Result},
+    search::{ResultEntry, SearchEntry},
+};
 
 pub const PRE_READ_OID: &str = "1.3.6.1.1.13.1";
 pub const POST_READ_OID: &str = "1.3.6.1.1.13.2";

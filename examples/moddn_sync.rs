@@ -1,8 +1,7 @@
 // Demonstrates the ModifyDN operation. The program will query
 // the database to find out which modification make sense.
 
-use ldap3::result::Result;
-use ldap3::{LdapConn, Scope, SearchEntry};
+use ldap3::{LdapConn, Scope, SearchEntry, result::Result};
 
 const TEST_RDN: &str = "uid=test";
 const NEXT_RDN: &str = "uid=next";

@@ -1,13 +1,14 @@
+use bytes::BytesMut;
+use lber::{
+    common::TagClass,
+    parse::{parse_tag, parse_uint},
+    structures::{ASNTag, Integer, OctetString, Sequence, Tag},
+    universal::Types,
+    write,
+};
+
 use super::{ControlParser, MakeCritical, RawControl};
 use crate::result::{LdapError, Result};
-
-use bytes::BytesMut;
-
-use lber::common::TagClass;
-use lber::parse::{parse_tag, parse_uint};
-use lber::structures::{ASNTag, Integer, OctetString, Sequence, Tag};
-use lber::universal::Types;
-use lber::write;
 
 /// Paged Results control ([RFC 2696](https://tools.ietf.org/html/rfc2696)).
 ///

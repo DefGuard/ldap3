@@ -18,16 +18,16 @@
 //! Adapters must be written with async calls, but work equally well for both async and sync versions of the API
 //! because the sync API is just a blocking façade for the async one.
 
-use std::fmt::Debug;
-use std::marker::PhantomData;
-
-use crate::controls::{self, Control, ControlType};
-use crate::ldap::Ldap;
-use crate::result::{LdapError, LdapResult, Result};
-use crate::search::parse_refs;
-use crate::search::{ResultEntry, Scope, SearchStream};
+use std::{fmt::Debug, marker::PhantomData};
 
 use async_trait::async_trait;
+
+use crate::{
+    controls::{self, Control, ControlType},
+    ldap::Ldap,
+    result::{LdapError, LdapResult, Result},
+    search::{ResultEntry, Scope, SearchStream, parse_refs},
+};
 
 /// Adapter interface to a Search.
 ///

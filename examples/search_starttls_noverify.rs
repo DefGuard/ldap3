@@ -5,8 +5,7 @@
 // 3. Ignoring an invalid X.509 certificate (self-signed and expired);
 // 4. Using a streaming Search.
 
-use ldap3::result::Result;
-use ldap3::{LdapConnAsync, LdapConnSettings, Scope, SearchEntry};
+use ldap3::{LdapConnAsync, LdapConnSettings, Scope, SearchEntry, result::Result};
 
 #[tokio::main]
 async fn main() -> Result<()> {

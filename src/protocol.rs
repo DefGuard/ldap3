@@ -4,23 +4,26 @@ use std::sync::RwLock;
 #[cfg(feature = "gssapi")]
 use std::sync::{Arc, Mutex};
 
-use crate::RequestId;
-use crate::controls::{Control, RawControl};
-use crate::controls_impl::{build_tag, parse_controls};
-use crate::search::SearchItem;
-
-use lber::common::TagClass;
-use lber::parse::parse_uint;
-use lber::structure::{PL, StructureTag};
-use lber::structures::{ASNTag, Integer, Sequence, Tag};
-use lber::universal::Types;
-use lber::write;
-
 use bytes::{Buf, BytesMut};
 #[cfg(feature = "gssapi")]
 use cross_krb5::{ClientCtx, K5Ctx};
+use lber::{
+    common::TagClass,
+    parse::parse_uint,
+    structure::{PL, StructureTag},
+    structures::{ASNTag, Integer, Sequence, Tag},
+    universal::Types,
+    write,
+};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::codec::{Decoder, Encoder};
+
+use crate::{
+    RequestId,
+    controls::{Control, RawControl},
+    controls_impl::{build_tag, parse_controls},
+    search::SearchItem,
+};
 
 pub(crate) struct LdapCodec {
     #[cfg(feature = "gssapi")]
@@ -115,8 +118,8 @@ fn decode_inner(buf: &mut BytesMut) -> Result<Option<(RequestId, (Tag, Vec<Contr
 }
 
 impl Decoder for LdapCodec {
-    type Item = (RequestId, (Tag, Vec<Control>));
     type Error = io::Error;
+    type Item = (RequestId, (Tag, Vec<Control>));
 
     #[cfg(not(feature = "gssapi"))]
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {

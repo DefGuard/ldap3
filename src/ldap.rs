@@ -1,28 +1,35 @@
-use std::collections::HashSet;
-use std::hash::Hash;
 #[cfg(feature = "gssapi")]
 use std::sync::RwLock;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-
-use crate::RequestId;
-use crate::adapters::{EntriesOnly, IntoAdapterVec};
-use crate::controls_impl::IntoRawControlVec;
-use crate::exop::Exop;
-use crate::exop_impl::construct_exop;
-use crate::protocol::{LdapOp, MaybeControls, MiscSender, ResultSender};
-use crate::result::{
-    CompareResult, ExopResult, LdapError, LdapResult, LdapResultExt, Result, SearchResult,
+use std::{
+    collections::HashSet,
+    hash::Hash,
+    sync::{Arc, Mutex},
+    time::Duration,
 };
-use crate::search::{Scope, SearchOptions, SearchStream};
-
-use lber::common::TagClass;
-use lber::structures::{Boolean, Enumerated, Integer, Null, OctetString, Sequence, Set, Tag};
 
 #[cfg(feature = "gssapi")]
 use cross_krb5::{ClientCtx, Cred, InitiateFlags, K5Ctx, Step};
-use tokio::sync::{mpsc, oneshot};
-use tokio::time;
+use lber::{
+    common::TagClass,
+    structures::{Boolean, Enumerated, Integer, Null, OctetString, Sequence, Set, Tag},
+};
+use tokio::{
+    sync::{mpsc, oneshot},
+    time,
+};
+
+use crate::{
+    RequestId,
+    adapters::{EntriesOnly, IntoAdapterVec},
+    controls_impl::IntoRawControlVec,
+    exop::Exop,
+    exop_impl::construct_exop,
+    protocol::{LdapOp, MaybeControls, MiscSender, ResultSender},
+    result::{
+        CompareResult, ExopResult, LdapError, LdapResult, LdapResultExt, Result, SearchResult,
+    },
+    search::{Scope, SearchOptions, SearchStream},
+};
 
 /// SASL bind exchange wrapper.
 #[allow(dead_code)]

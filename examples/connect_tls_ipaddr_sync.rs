@@ -1,7 +1,6 @@
 // Demonstrates TLS connection to an IP address.
 
-use ldap3::result::Result;
-use ldap3::{LdapConn, LdapConnSettings};
+use ldap3::{LdapConn, LdapConnSettings, result::Result};
 
 fn main() -> Result<()> {
     let mut ldap = LdapConn::with_settings(

@@ -1,30 +1,23 @@
-use std::collections::{HashMap, HashSet};
 #[cfg(feature = "tls-rustls")]
 use std::net::IpAddr;
-use std::pin::Pin;
 #[cfg(feature = "tls-rustls")]
 use std::str::FromStr;
 #[cfg(feature = "tls-rustls")]
 use std::sync::LazyLock;
 #[cfg(feature = "gssapi")]
 use std::sync::RwLock;
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
-use std::time::Duration;
-
-use crate::RequestId;
-#[cfg(any(feature = "tls-native", feature = "tls-rustls"))]
-use crate::exop_impl::StartTLS;
-use crate::ldap::Ldap;
-use crate::protocol::{ItemSender, LdapCodec, LdapOp, MaybeControls, MiscSender, ResultSender};
-use crate::result::{LdapError, LdapResult, Result};
-use crate::search::SearchItem;
-
-use lber::structures::{Null, Tag};
+use std::{
+    collections::{HashMap, HashSet},
+    pin::Pin,
+    sync::{Arc, Mutex},
+    task::{Context, Poll},
+    time::Duration,
+};
 
 #[cfg(any(feature = "tls-native", feature = "tls-rustls"))]
 use futures_util::future::TryFutureExt;
 use futures_util::sink::SinkExt;
+use lber::structures::{Null, Tag};
 #[cfg(feature = "tls-native")]
 use native_tls::TlsConnector;
 #[cfg(unix)]
@@ -33,19 +26,31 @@ use percent_encoding::percent_decode;
 use ring::digest::{self, Algorithm, digest};
 #[cfg(feature = "tls-rustls")]
 use rustls::{ClientConfig, RootCertStore, pki_types::CertificateDer, pki_types::ServerName};
-use tokio::io::{self, AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
-use tokio::net::TcpStream;
 #[cfg(unix)]
 use tokio::net::UnixStream;
-use tokio::sync::mpsc;
 #[cfg(any(feature = "tls-native", feature = "tls-rustls"))]
 use tokio::sync::oneshot;
-use tokio::time;
+use tokio::{
+    io::{self, AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf},
+    net::TcpStream,
+    sync::mpsc,
+    time,
+};
 #[cfg(all(feature = "tls-native", not(feature = "tls-rustls")))]
 use tokio_native_tls::{TlsConnector as TokioTlsConnector, TlsStream};
 #[cfg(all(feature = "tls-rustls", not(feature = "tls-native")))]
 use tokio_rustls::{TlsConnector as TokioTlsConnector, client::TlsStream};
 use tokio_stream::StreamExt;
+
+#[cfg(any(feature = "tls-native", feature = "tls-rustls"))]
+use crate::exop_impl::StartTLS;
+use crate::{
+    RequestId,
+    ldap::Ldap,
+    protocol::{ItemSender, LdapCodec, LdapOp, MaybeControls, MiscSender, ResultSender},
+    result::{LdapError, LdapResult, Result},
+    search::SearchItem,
+};
 #[cfg(all(feature = "tls-native", feature = "tls-rustls"))]
 compile_error!(r#"Only one of "tls-native" and "tls-rustls" may be enabled for TLS support"#);
 #[cfg(all(feature = "tls-rustls", not(feature = "rustls-provider")))]

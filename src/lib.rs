@@ -134,15 +134,18 @@ pub mod asn1 {
     //! be extensively overhauled in the future. If you need examples of using the present interface
     //! for, e.g., implementing a new extended operation or a control, consult the source of existing
     //! exops/controls.
-    pub use lber::IResult;
-    pub use lber::common::TagClass;
-    pub use lber::parse::{parse_tag, parse_uint};
-    pub use lber::structure::{PL, StructureTag};
-    pub use lber::structures::{
-        ASNTag, Boolean, Enumerated, ExplicitTag, Integer, Null, OctetString, Sequence, Set, Tag,
+    pub use lber::{
+        IResult,
+        common::TagClass,
+        parse::{parse_tag, parse_uint},
+        structure::{PL, StructureTag},
+        structures::{
+            ASNTag, Boolean, Enumerated, ExplicitTag, Integer, Null, OctetString, Sequence, Set,
+            Tag,
+        },
+        universal::Types,
+        write,
     };
-    pub use lber::universal::Types;
-    pub use lber::write;
 }
 mod conn;
 pub mod controls {
@@ -203,19 +206,13 @@ pub mod controls {
     //! }
     //! # Ok(())
     //! # }
-    pub use crate::controls_impl::TxnSpec;
     pub use crate::controls_impl::{
-        Assertion, ManageDsaIt, MatchedValues, PagedResults, ProxyAuth, RelaxRules,
+        Assertion, Control, ControlParser, ControlType, CriticalControl, EntryState,
+        IntoRawControlVec, MakeCritical, ManageDsaIt, MatchedValues, PagedResults, PostRead,
+        PostReadResp, PreRead, PreReadResp, ProxyAuth, RawControl, ReadEntryResp, RefreshMode,
+        RelaxRules, SyncDone, SyncInfo, SyncRequest, SyncState, TxnSpec, parse_syncinfo,
+        try_parse_syncinfo,
     };
-    pub use crate::controls_impl::{
-        Control, ControlParser, ControlType, CriticalControl, IntoRawControlVec, MakeCritical,
-        RawControl,
-    };
-    pub use crate::controls_impl::{
-        EntryState, RefreshMode, SyncDone, SyncInfo, SyncRequest, SyncState,
-    };
-    pub use crate::controls_impl::{PostRead, PostReadResp, PreRead, PreReadResp, ReadEntryResp};
-    pub use crate::controls_impl::{parse_syncinfo, try_parse_syncinfo};
 }
 mod controls_impl;
 mod exop_impl;
@@ -252,8 +249,8 @@ pub use ldap::{Ldap, Mod};
 pub use result::{LdapError, LdapResult, SearchResult};
 pub use search::{
     DerefAliases, ResultEntry, Scope, SearchEntry, SearchOptions, SearchStream, StreamState,
+    parse_refs, try_parse_refs,
 };
-pub use search::{parse_refs, try_parse_refs};
 #[cfg(feature = "sync")]
 pub use sync::{EntryStream, LdapConn};
 pub use util::{LdapUrlExt, LdapUrlParams, dn_escape, get_url_params, ldap_escape, ldap_unescape};

@@ -1,5 +1,7 @@
-use lber::common::TagClass;
-use lber::structures::{OctetString, Tag};
+use lber::{
+    common::TagClass,
+    structures::{OctetString, Tag},
+};
 
 use crate::result::{LdapError, Result};
 

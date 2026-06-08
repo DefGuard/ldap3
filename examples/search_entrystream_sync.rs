@@ -7,8 +7,7 @@
 //    directions for the ordering of steps to avoid
 //    double-borrowing.
 
-use ldap3::result::Result;
-use ldap3::{LdapConn, Scope, SearchEntry};
+use ldap3::{LdapConn, Scope, SearchEntry, result::Result};
 
 fn main() -> Result<()> {
     let mut ldap = LdapConn::new("ldap://localhost:2389")?;

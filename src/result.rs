@@ -5,28 +5,23 @@
 //! helper methods, which adapt LDAP result and error handling to be a closer
 //! match to Rust conventions.
 
-use std::error::Error;
-use std::fmt;
-use std::io;
-use std::result::Result as StdResult;
+use std::{error::Error, fmt, io, result::Result as StdResult};
 
-use crate::RequestId;
-use crate::controls::Control;
-use crate::exop::Exop;
-use crate::ldap::SaslCreds;
-use crate::protocol::MiscSender;
-use crate::protocol::{LdapOp, MaybeControls, ResultSender};
-use crate::search::ResultEntry;
-use crate::search::try_parse_refs;
-
-use lber::common::TagClass;
-use lber::parse::parse_uint;
-use lber::structures::Tag;
-use lber::universal::Types;
-
+use lber::{common::TagClass, parse::parse_uint, structures::Tag, universal::Types};
 use thiserror::Error;
-use tokio::sync::{mpsc, oneshot};
-use tokio::time;
+use tokio::{
+    sync::{mpsc, oneshot},
+    time,
+};
+
+use crate::{
+    RequestId,
+    controls::Control,
+    exop::Exop,
+    ldap::SaslCreds,
+    protocol::{LdapOp, MaybeControls, MiscSender, ResultSender},
+    search::{ResultEntry, try_parse_refs},
+};
 
 /// Type alias for the standard `Result` with the fixed `LdapError` error part.
 pub type Result<T> = std::result::Result<T, LdapError>;
@@ -572,8 +567,9 @@ impl ExopResult {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use lber::structure::{PL, StructureTag};
+
+    use super::*;
 
     fn prim(class: TagClass, id: u64, val: &[u8]) -> StructureTag {
         StructureTag {

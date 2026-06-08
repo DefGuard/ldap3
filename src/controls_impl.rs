@@ -1,9 +1,10 @@
-use std::collections::HashMap;
-use std::sync::LazyLock;
+use std::{collections::HashMap, sync::LazyLock};
 
-use lber::structure::{PL, StructureTag};
-use lber::structures::{ASNTag, Boolean, OctetString, Sequence, Tag};
-use lber::universal::Types;
+use lber::{
+    structure::{PL, StructureTag},
+    structures::{ASNTag, Boolean, OctetString, Sequence, Tag},
+    universal::Types,
+};
 
 use crate::result::{LdapError, Result};
 
@@ -28,8 +29,10 @@ mod assertion;
 pub use self::assertion::Assertion;
 
 mod content_sync;
-pub use self::content_sync::{EntryState, RefreshMode, SyncDone, SyncInfo, SyncRequest, SyncState};
-pub use self::content_sync::{parse_syncinfo, try_parse_syncinfo};
+pub use self::content_sync::{
+    EntryState, RefreshMode, SyncDone, SyncInfo, SyncRequest, SyncState, parse_syncinfo,
+    try_parse_syncinfo,
+};
 
 mod paged_results;
 pub use self::paged_results::PagedResults;

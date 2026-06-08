@@ -1,10 +1,11 @@
 use bytes::BytesMut;
+use lber::{structures::ASNTag, write};
 
 use super::{MakeCritical, RawControl};
-use crate::filter::parse;
-use crate::result::{LdapError, Result};
-use lber::structures::ASNTag;
-use lber::write;
+use crate::{
+    filter::parse,
+    result::{LdapError, Result},
+};
 
 pub const ASSERTION_OID: &str = "1.3.6.1.1.12";
 

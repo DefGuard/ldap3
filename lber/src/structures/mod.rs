@@ -8,12 +8,14 @@ pub mod octetstring;
 pub mod sequence;
 
 // Reexport everything
-pub use self::boolean::Boolean;
-pub use self::explicit::ExplicitTag;
-pub use self::integer::{Enumerated, Integer};
-pub use self::null::Null;
-pub use self::octetstring::OctetString;
-pub use self::sequence::{Sequence, SequenceOf, Set, SetOf};
+pub use self::{
+    boolean::Boolean,
+    explicit::ExplicitTag,
+    integer::{Enumerated, Integer},
+    null::Null,
+    octetstring::OctetString,
+    sequence::{Sequence, SequenceOf, Set, SetOf},
+};
 
 /// Conversion of a tag into a serializable form.
 pub trait ASNTag {

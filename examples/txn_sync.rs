@@ -7,10 +7,12 @@
 
 use std::collections::HashSet;
 
-use ldap3::LdapConn;
-use ldap3::controls::TxnSpec;
-use ldap3::exop::{EndTxn, EndTxnResp, StartTxn, StartTxnResp};
-use ldap3::result::Result;
+use ldap3::{
+    LdapConn,
+    controls::TxnSpec,
+    exop::{EndTxn, EndTxnResp, StartTxn, StartTxnResp},
+    result::Result,
+};
 
 fn main() -> Result<()> {
     let mut ldap = LdapConn::new("ldap://localhost:2389")?;

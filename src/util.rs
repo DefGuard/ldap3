@@ -1,13 +1,17 @@
-use std::borrow::Cow;
-use std::collections::HashSet;
-use std::hash::{Hash, Hasher};
-
-use crate::filter::Unescaper;
-use crate::result::{LdapError, Result};
-use crate::search::Scope;
+use std::{
+    borrow::Cow,
+    collections::HashSet,
+    hash::{Hash, Hasher},
+};
 
 use percent_encoding::percent_decode_str;
 use url::Url;
+
+use crate::{
+    filter::Unescaper,
+    result::{LdapError, Result},
+    search::Scope,
+};
 
 /// Escape a filter literal.
 ///

@@ -8,9 +8,11 @@
 
 use std::collections::HashSet;
 
-use ldap3::controls::{MakeCritical, RelaxRules};
-use ldap3::result::Result;
-use ldap3::{LdapConn, Mod, Scope};
+use ldap3::{
+    LdapConn, Mod, Scope,
+    controls::{MakeCritical, RelaxRules},
+    result::Result,
+};
 
 fn main() -> Result<()> {
     let mut ldap = LdapConn::new("ldap://localhost:2389")?;

@@ -8,8 +8,7 @@
 // The synchronous API lacks the method to retrieve the underlying
 // Ldap handle, but last_id() can be called directly on the stream.
 
-use ldap3::result::Result;
-use ldap3::{LdapConnAsync, Scope};
+use ldap3::{LdapConnAsync, Scope, result::Result};
 
 #[tokio::main]
 async fn main() -> Result<()> {

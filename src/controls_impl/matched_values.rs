@@ -2,9 +2,10 @@ use bytes::BytesMut;
 use lber::{structures::ASNTag, write};
 
 use super::RawControl;
-
-use crate::filter::parse_matched_values;
-use crate::result::{LdapError, Result};
+use crate::{
+    filter::parse_matched_values,
+    result::{LdapError, Result},
+};
 
 pub const MATCHED_VALUES_OID: &str = "1.2.826.0.1.3344810.2.3";
 
